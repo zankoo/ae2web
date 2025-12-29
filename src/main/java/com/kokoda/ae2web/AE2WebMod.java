@@ -2,6 +2,7 @@ package com.kokoda.ae2web;
 
 import com.kokoda.ae2web.registry.ModBlockEntities;
 import com.kokoda.ae2web.registry.ModBlocks;
+import com.kokoda.ae2web.registry.ModCreativeTabs;
 import com.kokoda.ae2web.registry.ModItems;
 import com.kokoda.ae2web.setup.ClientSetup;
 import com.kokoda.ae2web.setup.CommonSetup;
@@ -32,6 +33,7 @@ public class AE2WebMod {
         ModBlocks.register(modEventBus);
         ModItems.register(modEventBus);
         ModBlockEntities.register(modEventBus);
+        ModCreativeTabs.register(modEventBus);
         AE2WebConfig.register();
 
         // Register setup methods

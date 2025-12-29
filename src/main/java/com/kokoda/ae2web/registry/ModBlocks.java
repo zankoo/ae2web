@@ -17,7 +17,7 @@ public class ModBlocks {
     public static final RegistryObject<Block> WEB_TERMINAL = BLOCKS.register("web_terminal",
             () -> new WebTerminalBlock(BlockBehaviour.Properties.of()
                     .mapColor(MapColor.METAL)
-                    .strength(3.0f, 6.0f)
+                    .strength(2.0f, 6.0f)
                     .requiresCorrectToolForDrops()
                     .noOcclusion()));
 

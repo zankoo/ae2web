@@ -1,0 +1,22 @@
+{
+    "type": "minecraft:crafting_shaped",
+    "pattern": [
+        "IPI",
+        "PTP",
+        "IPI"
+    ],
+    "key": {
+        "T": {
+            "item": "ae2:terminal"
+        },
+        "P": {
+            "item": "ae2:logic_processor"
+        },
+        "I": {
+            "tag": "forge:ingots/iron"
+        }
+    },
+    "result": {
+        "item": "ae2web:web_terminal"
+    }
+}
