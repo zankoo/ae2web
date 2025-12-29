@@ -1,8 +1,8 @@
-# AE2 Web Terminal - Good Taste Refactoring
+# AE2 Web Terminal - Task List
 
 ## Pending
 
-- (none)
+- [ ] MED-1: Update version string in ApiHandler.java handleStatus() from hardcoded "1.0.0" to read from mod metadata
 
 ## In Progress
 
@@ -25,5 +25,7 @@
 - [x] MED-7: Optimize inventory query - add caching
 - [x] MED-8: Implement /api/craft endpoint or return 501 Not Implemented
 - [x] MED-9: Implement /api/cpus endpoint or return 501 Not Implemented
+- [x] HIGH-1: Fix getNetworkInventory() returning empty - change from getCachedInventory() to getInventory().getAvailableStacks() in WebTerminalBlockEntity.java
+- [x] HIGH-2: Add debug logging in getNetworkInventory() to log inventory size before returning
 
 ## Blocked

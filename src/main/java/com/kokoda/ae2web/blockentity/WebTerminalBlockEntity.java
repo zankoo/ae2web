@@ -88,7 +88,6 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
 
     /**
      * Get all items stored in the ME network.
-     * Uses AE2's cached inventory which updates once per tick for better performance.
      */
     public Map<AEKey, Long> getNetworkInventory() {
         if (!isConnectedToGrid()) {
@@ -101,14 +100,22 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
                 return Collections.emptyMap();
             }
 
-            // Use AE2's built-in cached inventory (updates once per tick)
-            KeyCounter cachedInventory = grid.getStorageService().getCachedInventory();
+            var storageService = grid.getStorageService();
+            if (storageService == null) {
+                return Collections.emptyMap();
+            }
+
+            // Use the live inventory view to avoid issues with an empty cached inventory.
+            KeyCounter availableStacks = storageService.getInventory().getAvailableStacks();
             Map<AEKey, Long> result = new HashMap<>();
-            for (var entry : cachedInventory) {
+            for (var entry : availableStacks) {
                 if (entry.getKey() instanceof AEItemKey && entry.getLongValue() > 0) {
                     result.put(entry.getKey(), entry.getLongValue());
                 }
             }
+            AE2WebMod.LOGGER.debug(
+                    "Network inventory fetched for terminal {} at {}: {} keys (filtered to {} item keys)",
+                    terminalId, worldPosition, availableStacks.size(), result.size());
             return result;
         } catch (Exception e) {
             AE2WebMod.LOGGER.error("Error getting network inventory", e);
