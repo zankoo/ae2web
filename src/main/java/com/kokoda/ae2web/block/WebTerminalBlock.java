@@ -9,6 +9,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
@@ -64,7 +65,7 @@ public class WebTerminalBlock extends Block implements EntityBlock {
     }
 
     @Override
-    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, 
+    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player,
                                   InteractionHand hand, BlockHitResult hit) {
         if (level.isClientSide()) {
             return InteractionResult.sidedSuccess(true);
@@ -72,6 +73,16 @@ public class WebTerminalBlock extends Block implements EntityBlock {
 
         BlockEntity be = level.getBlockEntity(pos);
         if (!(be instanceof WebTerminalBlockEntity terminal)) {
+            return InteractionResult.sidedSuccess(false);
+        }
+
+        // Shift+right-click to pick up (like AE2 blocks)
+        if (player.isShiftKeyDown()) {
+            ItemStack drop = new ItemStack(this);
+            if (!player.getInventory().add(drop)) {
+                player.drop(drop, false);
+            }
+            level.removeBlock(pos, false);
             return InteractionResult.sidedSuccess(false);
         }
 
