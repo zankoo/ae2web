@@ -18,8 +18,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeListener<WebTerminalBlockEntity> {
 
@@ -105,11 +103,13 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
 
             // Use AE2's built-in cached inventory (updates once per tick)
             KeyCounter cachedInventory = grid.getStorageService().getCachedInventory();
-            return StreamSupport.stream(cachedInventory.spliterator(), false)
-                    .filter(AEItemKey.class::isInstance)
-                    .map(AEItemKey.class::cast)
-                    .filter(key -> cachedInventory.get(key) > 0)
-                    .collect(Collectors.toMap(key -> key, cachedInventory::get));
+            Map<AEKey, Long> result = new HashMap<>();
+            for (var entry : cachedInventory) {
+                if (entry.getKey() instanceof AEItemKey && entry.getLongValue() > 0) {
+                    result.put(entry.getKey(), entry.getLongValue());
+                }
+            }
+            return result;
         } catch (Exception e) {
             AE2WebMod.LOGGER.error("Error getting network inventory", e);
             return Collections.emptyMap();

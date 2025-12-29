@@ -54,24 +54,130 @@ AE2 Web Terminal is a Minecraft Forge mod (1.20.1) that adds a Web Terminal bloc
 
 ## Version Control & Semantic Versioning
 
-**Current Version:** 1.0.0 (established at first commit)
+版本号位置: `gradle.properties` 中的 `mod_version` 字段（唯一来源，构建时自动替换到 mods.toml）
 
-版本号遵循语义化版本规范 (SemVer):
-- **MAJOR (X.0.0)**: 不兼容的 API 变更
-- **MINOR (0.X.0)**: 向后兼容的新功能
-- **PATCH (0.0.X)**: 向后兼容的 bug 修复
+### 语义化版本规范 (SemVer)
 
-版本号位置:
-- `build.gradle` 中的 `version` 字段
-- `src/main/resources/META-INF/mods.toml` 中的 `version` 字段
+格式: `MAJOR.MINOR.PATCH`
 
-**Commit 规范:**
-- 在合适的时机提交代码（功能完成、bug 修复、重构完成等）
-- 根据变更类型更新版本号
-- Commit message 应清晰描述变更内容
-- 使用 Co-Authored-By 标注 AI 工具的贡献
+| 类型 | 何时更新 | 示例 |
+|------|----------|------|
+| **MAJOR (X.0.0)** | 不兼容的 API 变更、重大架构重构、删除公开功能 | 1.0.0 → 2.0.0 |
+| **MINOR (0.X.0)** | 新增功能、新增 API 端点、新增配置项（向后兼容） | 1.0.0 → 1.1.0 |
+| **PATCH (0.0.X)** | Bug 修复、性能优化、代码重构（不改变功能） | 1.0.0 → 1.0.1 |
+
+### 版本更新规则（必须严格遵守）
+
+1. **每次提交前必须检查是否需要更新版本号**
+2. **同一版本号只能提交一次**：如果当前版本已提交到 git，必须先更新版本号再提交新更改
+3. **版本号只增不减**：永远不要降低版本号
+4. **MINOR 更新时 PATCH 归零**：1.2.3 → 1.3.0
+5. **MAJOR 更新时 MINOR 和 PATCH 归零**：1.2.3 → 2.0.0
+
+### 变更类型判断
+
+**PATCH (bug 修复)**:
+- 修复代码逻辑错误
+- 修复 API 返回错误数据
+- 修复崩溃/异常
+- 修复 UI 显示问题
+- 性能优化（不改变行为）
+- 代码重构（不改变功能）
+
+**MINOR (新功能)**:
+- 新增 API 端点
+- 新增配置选项
+- 新增 UI 功能
+- 新增命令/交互方式
+- 增强现有功能（向后兼容）
+
+**MAJOR (破坏性变更)**:
+- 删除或重命名 API 端点
+- 更改 API 响应格式
+- 更改配置文件格式
+- 删除功能
+- 不兼容的数据格式变更
+
+### Commit 规范
+
+- Commit message 格式: `<type>: <description>`
+- type: `feat`(新功能), `fix`(修复), `refactor`(重构), `chore`(杂项), `docs`(文档)
+- 每次提交前必须运行 `./gradlew build` 确保编译通过
 
 ## Automation Tasks & TODO.md
 File: keep a single docs/TODO.md to track phased tasks.
 Sections: Pending, In Progress, Completed, Blocked.
 Item format: short verb phrase + optional owner and ID. Update status by moving the line between sections and toggling the checkbox.
+
+## Codex 协作工作流
+
+### 角色分工（必须严格遵守）
+
+| 角色 | 职责 | 禁止事项 |
+|------|------|----------|
+| **Claude（架构师/调度者）** | 任务拆分、架构设计、代码审查、进度监控、与用户沟通 | 不亲自编写大量代码 |
+| **Codex（执行者）** | 编写代码、修复 bug、重构、运行测试、更新 TODO.md | - |
+
+**原则：Claude 负责"想"，Codex 负责"做"**
+
+- Claude 只做轻量操作：读取文件、分析代码、设计方案、拆分任务
+- 所有代码编写工作必须交给 Codex 执行
+- Claude 通过 TODO.md 向 Codex 下达具体指令
+
+Codex 是 Claude 的 AI 伙伴工具，可以通过命令行执行任务。通过循环启动 Codex 来持续完成 TODO.md 中的任务。
+
+### 核心命令
+
+```bash
+codex exec "continue to next task" --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox
+```
+
+### 工作流程（项目管理者模式）
+
+**接收任务时必须执行：**
+
+1. **任务拆分**: 将用户需求拆分为具体可执行的子任务
+2. **写入 TODO.md**: 将子任务写入 `docs/TODO.md` 的 Pending 部分
+3. **启动 Codex**: 使用 Task Tool 启动 agent 执行 codex 命令
+4. **监控执行**: agent 观察 codex 任务执行情况
+5. **循环重启**: 任务完成后启动新 agent 继续下一个任务
+
+### 任务拆分规范
+
+- 每个任务应该是独立可执行的单元
+- 任务描述清晰，包含具体文件或功能点
+- 使用前缀标识优先级：`HIGH-`, `MED-`, `LOW-`
+- 格式：`- [ ] PREFIX-N: 动词短语描述`
+
+示例：
+```markdown
+## Pending
+- [ ] HIGH-1: Fix inventory display bug in WebTerminalBlockEntity
+- [ ] MED-1: Add pagination to /api/items endpoint
+- [ ] LOW-1: Optimize CSS loading in web UI
+```
+
+### 执行规范
+
+- 每次启动 codex 和监控都使用新的 agent（避免主 agent 上下文过长）
+- Codex 根据 TODO.md 中的 Pending 任务自动执行
+- 完成任务后 Codex 会更新 TODO.md 状态
+- 主 agent 作为项目管理者，负责调度和监督
+
+### 启动示例
+
+```
+用户需求 → 拆分任务 → 写入 TODO.md
+  ↓
+Task Tool → agent 执行 codex
+  ↓
+监控输出，等待完成
+  ↓
+任务完成 → 启动新 agent 重复
+```
+
+### 注意事项
+
+- Codex 任务可能耗时较长，需要耐心等待
+- 如果 TODO.md 的 Pending 为空，先拆分任务再启动 Codex
+- 定期检查 TODO.md 状态确认进度
