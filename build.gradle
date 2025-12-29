@@ -94,9 +94,9 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.10.1'
     
     // Netty HTTP codec for web server - use jarJar to embed in mod
-    // Version must match Minecraft's bundled Netty (4.1.x), not 5.x
+    // MUST use exact same version as Minecraft (4.1.82.Final) to avoid class incompatibility
     implementation "io.netty:netty-codec-http:${nettyHttpVersion}"
-    jarJar(group: 'io.netty', name: 'netty-codec-http', version: "[${nettyHttpVersion},4.2)")
+    jarJar(group: 'io.netty', name: 'netty-codec-http', version: "[${nettyHttpVersion}]")
 }
 
 // Configure jarJar task
