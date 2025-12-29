@@ -4,11 +4,15 @@ import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import com.kokoda.ae2web.config.AE2WebConfig;
 import com.kokoda.ae2web.registry.ModBlockEntities;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -21,6 +25,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.Nullable;
 
 public class WebTerminalBlock extends Block implements EntityBlock {
+
+    private static final TagKey<Item> WRENCH_TAG = TagKey.create(Registries.ITEM,
+            new ResourceLocation("forge", "tools/wrench"));
 
     public WebTerminalBlock(Properties properties) {
         super(properties);
@@ -76,8 +83,9 @@ public class WebTerminalBlock extends Block implements EntityBlock {
             return InteractionResult.sidedSuccess(false);
         }
 
-        // Shift+right-click to pick up (like AE2 blocks)
-        if (player.isShiftKeyDown()) {
+        // Shift+right-click with wrench to pick up (like AE2 blocks)
+        ItemStack heldItem = player.getItemInHand(hand);
+        if (player.isShiftKeyDown() && heldItem.is(WRENCH_TAG)) {
             ItemStack drop = new ItemStack(this);
             if (!player.getInventory().add(drop)) {
                 player.drop(drop, false);
