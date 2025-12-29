@@ -16,14 +16,25 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.capabilities.CapabilityManager;
+import net.minecraftforge.common.capabilities.CapabilityToken;
+import net.minecraftforge.common.util.LazyOptional;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
-public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeListener<WebTerminalBlockEntity> {
+public class WebTerminalBlockEntity extends BlockEntity
+        implements IGridNodeListener<WebTerminalBlockEntity>, IInWorldGridNodeHost {
+
+    private static final Capability<IInWorldGridNodeHost> IN_WORLD_GRID_NODE_HOST_CAPABILITY =
+            CapabilityManager.get(new CapabilityToken<>() {
+            });
 
     private IManagedGridNode mainNode;
     private String terminalId;
     private boolean isConnected = false;
+    private final LazyOptional<IInWorldGridNodeHost> inWorldGridNodeHostCapability = LazyOptional.of(() -> this);
 
     public WebTerminalBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.WEB_TERMINAL.get(), pos, state);
@@ -52,9 +63,24 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
         }
     }
 
+    @Override
+    public <T> LazyOptional<T> getCapability(Capability<T> cap, @Nullable Direction side) {
+        if (cap == IN_WORLD_GRID_NODE_HOST_CAPABILITY) {
+            return inWorldGridNodeHostCapability.cast();
+        }
+        return super.getCapability(cap, side);
+    }
+
+    @Override
+    public void invalidateCaps() {
+        super.invalidateCaps();
+        inWorldGridNodeHostCapability.invalidate();
+    }
+
     private void initializeGridNode() {
         try {
             mainNode = GridHelper.createManagedNode(this, this)
+                    .setInWorldNode(true)
                     .setFlags(GridFlags.REQUIRE_CHANNEL)
                     .setIdlePowerUsage(1.0)
                     .setVisualRepresentation(ModBlocks.WEB_TERMINAL.get());
@@ -68,6 +94,14 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
         } catch (Exception e) {
             AE2WebMod.LOGGER.error("Failed to initialize grid node", e);
         }
+    }
+
+    @Override
+    public IGridNode getGridNode(Direction direction) {
+        if (mainNode == null) {
+            return null;
+        }
+        return mainNode.getNode();
     }
 
     public boolean isConnectedToGrid() {

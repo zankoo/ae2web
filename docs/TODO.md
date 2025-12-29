@@ -6,6 +6,9 @@
 
 ## Completed
 
+- [x] HIGH-1: Fix AE2 cable connection - WebTerminalBlockEntity implements IInWorldGridNodeHost and exposes getGridNode(Direction)
+- [x] HIGH-2: Register IN_WORLD_GRID_NODE_HOST capability type - register IInWorldGridNodeHost via RegisterCapabilitiesEvent
+- [x] HIGH-3: Update grid node creation - in initializeGridNode() add .setInWorldNode(true) to the GridHelper.createManagedNode() chain
 - [x] HIGH-1: Change debug log to info level in getNetworkInventory() in WebTerminalBlockEntity.java - change LOGGER.debug to LOGGER.info for inventory fetch logging
 - [x] MED-1: Update version string in ApiHandler.java handleStatus() from hardcoded "1.0.0" to read from mod metadata
 - [x] TASTE-1: Delete dead code - removed ItemStackDTO.craftable field, deleted CraftRequestDTO.java, cleaned up web UI
