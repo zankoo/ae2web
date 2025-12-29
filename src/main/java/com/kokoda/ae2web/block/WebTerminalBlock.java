@@ -1,0 +1,92 @@
+package com.kokoda.ae2web.block;
+
+import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
+import com.kokoda.ae2web.config.AE2WebConfig;
+import com.kokoda.ae2web.registry.ModBlockEntities;
+import net.minecraft.core.BlockPos;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import org.jetbrains.annotations.Nullable;
+
+public class WebTerminalBlock extends Block implements EntityBlock {
+
+    public WebTerminalBlock(Properties properties) {
+        super(properties);
+    }
+
+    private static void sendTerminalStatus(Player player, WebTerminalBlockEntity terminal) {
+        player.sendSystemMessage(Component.literal("[AE2 Web Terminal]").withStyle(ChatFormatting.GOLD));
+
+        boolean connected = terminal.isConnectedToGrid();
+        ChatFormatting statusColor = connected ? ChatFormatting.GREEN : ChatFormatting.RED;
+        player.sendSystemMessage(Component.literal("Status: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(connected ? "Connected" : "Not Connected").withStyle(statusColor)));
+
+        if (!connected) {
+            player.sendSystemMessage(Component.literal("Connect to an ME network to enable web access.")
+                    .withStyle(ChatFormatting.GRAY));
+            return;
+        }
+
+        String url = "http://localhost:" + AE2WebConfig.getHttpPort();
+        player.sendSystemMessage(Component.literal("Access URL: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(url).withStyle(ChatFormatting.AQUA)));
+        player.sendSystemMessage(Component.literal("Terminal ID: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(terminal.getTerminalId()).withStyle(ChatFormatting.YELLOW)));
+    }
+
+    @Nullable
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new WebTerminalBlockEntity(pos, state);
+    }
+
+    @Nullable
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
+        if (level.isClientSide()) {
+            return null;
+        }
+        return type == ModBlockEntities.WEB_TERMINAL.get() 
+                ? (lvl, pos, st, be) -> ((WebTerminalBlockEntity) be).tick() 
+                : null;
+    }
+
+    @Override
+    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, 
+                                  InteractionHand hand, BlockHitResult hit) {
+        if (level.isClientSide()) {
+            return InteractionResult.sidedSuccess(true);
+        }
+
+        BlockEntity be = level.getBlockEntity(pos);
+        if (!(be instanceof WebTerminalBlockEntity terminal)) {
+            return InteractionResult.sidedSuccess(false);
+        }
+
+        sendTerminalStatus(player, terminal);
+        return InteractionResult.sidedSuccess(false);
+    }
+
+    @Override
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (!state.is(newState.getBlock())) {
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be instanceof WebTerminalBlockEntity terminal) {
+                terminal.onRemoved();
+            }
+        }
+        super.onRemove(state, level, pos, newState, isMoving);
+    }
+}

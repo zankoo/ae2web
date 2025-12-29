@@ -1,0 +1,29 @@
+# AE2 Web Terminal - Good Taste Refactoring
+
+## Pending
+
+- (none)
+
+## In Progress
+
+## Completed
+
+- [x] TASTE-1: Delete dead code - removed ItemStackDTO.craftable field, deleted CraftRequestDTO.java, cleaned up web UI
+- [x] TASTE-2: Fix hardcoded URL/port in WebTerminalBlock - now uses AE2WebConfig.getHttpPort(), ChatFormatting
+- [x] TASTE-3: Extract terminal check helper in ApiHandler - created getConnectedTerminal() method
+- [x] TASTE-4: Refactor WebServer from static to singleton pattern - converted static fields/methods to singleton instance
+- [x] TASTE-5: Split handleItems() responsibilities - extracted filterItems(), sortByAmount(), paginate(), matchesSearch()
+- [x] TASTE-6: Reduce nesting in getNetworkInventory() - refactored to stream-based inventory collection
+- [x] TASTE-7: Extract message building in WebTerminalBlock.use() - created sendTerminalStatus() helper
+- [x] HIGH-1: Fix thread safety - wrap Netty handler world/AE2 access in server thread execution
+- [x] MED-1: Fix memory leak - unregister terminal in onChunkUnloaded
+- [x] MED-2: Register config - call AE2WebConfig.register() in mod constructor
+- [x] MED-3: Add input validation for page/pageSize params with bounds checking
+- [x] MED-4: Fix information leakage - return generic error messages to clients
+- [x] MED-5: Add null check in getActionSource()
+- [x] MED-6: Fix blocking bind().sync() - run in separate thread
+- [x] MED-7: Optimize inventory query - add caching
+- [x] MED-8: Implement /api/craft endpoint or return 501 Not Implemented
+- [x] MED-9: Implement /api/cpus endpoint or return 501 Not Implemented
+
+## Blocked

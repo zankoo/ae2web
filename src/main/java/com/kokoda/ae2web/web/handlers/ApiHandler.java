@@ -1,0 +1,320 @@
+package com.kokoda.ae2web.web.handlers;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
+import com.kokoda.ae2web.AE2WebMod;
+import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
+import com.kokoda.ae2web.config.AE2WebConfig;
+import com.kokoda.ae2web.web.WebServer;
+import com.kokoda.ae2web.web.dto.ItemStackDTO;
+import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.AEKey;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.http.*;
+import io.netty.util.CharsetUtil;
+import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.server.ServerLifecycleHooks;
+
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+
+public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final int DEFAULT_PAGE_SIZE = 100;
+    private static final int MAX_PAGE_SIZE = 500;
+
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
+        String uri = request.uri();
+        HttpMethod method = request.method();
+
+        // Add CORS headers
+        HttpHeaders headers = new DefaultHttpHeaders();
+        headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, OPTIONS");
+        headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Authorization");
+
+        // Handle CORS preflight
+        if (method == HttpMethod.OPTIONS) {
+            sendResponse(ctx, HttpResponseStatus.OK, "", headers);
+            return;
+        }
+
+        // Check authentication if enabled
+        if (AE2WebConfig.isAuthEnabled()) {
+            String authHeader = request.headers().get(HttpHeaderNames.AUTHORIZATION);
+            String expectedToken = "Bearer " + AE2WebConfig.getAuthToken();
+            if (authHeader == null || !authHeader.equals(expectedToken)) {
+                sendJsonResponse(ctx, HttpResponseStatus.UNAUTHORIZED, 
+                        errorJson("Unauthorized - Invalid or missing token"), headers);
+                return;
+            }
+        }
+
+        try {
+            // Route requests
+            if (uri.equals("/") || uri.equals("/index.html")) {
+                serveStaticFile(ctx, "index.html", "text/html", headers);
+            } else if (uri.equals("/style.css")) {
+                serveStaticFile(ctx, "style.css", "text/css", headers);
+            } else if (uri.equals("/app.js")) {
+                serveStaticFile(ctx, "app.js", "application/javascript", headers);
+            } else if (uri.startsWith("/api/")) {
+                handleApiRequest(ctx, request, uri, method, headers);
+            } else {
+                sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, 
+                        errorJson("Not Found"), headers);
+            }
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.error("Error handling request: {}", uri, e);
+            sendJsonResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, 
+                    errorJson("Internal Server Error"), headers);
+        }
+    }
+
+    private void handleApiRequest(ChannelHandlerContext ctx, FullHttpRequest request, 
+                                   String uri, HttpMethod method, HttpHeaders headers) {
+        
+        // Parse query parameters
+        QueryStringDecoder decoder = new QueryStringDecoder(uri);
+        String path = decoder.path();
+        Map<String, List<String>> params = decoder.parameters();
+
+        if (path.equals("/api/status")) {
+            handleStatus(ctx, headers);
+        } else if (path.equals("/api/terminals")) {
+            handleTerminals(ctx, headers);
+        } else if (path.equals("/api/items")) {
+            handleItems(ctx, params, headers);
+        } else if (path.equals("/api/craft") && method == HttpMethod.POST) {
+            String body = request.content().toString(CharsetUtil.UTF_8);
+            handleCraft(ctx, body, headers);
+        } else if (path.equals("/api/cpus")) {
+            handleCpus(ctx, headers);
+        } else {
+            sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, 
+                    errorJson("API endpoint not found: " + path), headers);
+        }
+    }
+
+    private void handleStatus(ChannelHandlerContext ctx, HttpHeaders headers) {
+        runOnServerThread(ctx, headers, () -> {
+            JsonObject status = new JsonObject();
+            status.addProperty("running", true);
+            status.addProperty("terminals", WebServer.getInstance().getTerminals().size());
+            status.addProperty("version", "1.0.0");
+            sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(status), headers);
+        });
+    }
+
+    private void handleTerminals(ChannelHandlerContext ctx, HttpHeaders headers) {
+        runOnServerThread(ctx, headers, () -> {
+            List<Map<String, Object>> terminalList = new ArrayList<>();
+
+            for (WebTerminalBlockEntity terminal : WebServer.getInstance().getTerminals().values()) {
+                Map<String, Object> info = new HashMap<>();
+                info.put("id", terminal.getTerminalId());
+                info.put("connected", terminal.isConnectedToGrid());
+                info.put("position", Map.of(
+                        "x", terminal.getPosition().getX(),
+                        "y", terminal.getPosition().getY(),
+                        "z", terminal.getPosition().getZ()
+                ));
+                if (terminal.getTerminalLevel() != null) {
+                    info.put("dimension", terminal.getTerminalLevel().dimension().location().toString());
+                }
+                terminalList.add(info);
+            }
+
+            sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(terminalList), headers);
+        });
+    }
+
+    private void handleItems(ChannelHandlerContext ctx, Map<String, List<String>> params, HttpHeaders headers) {
+        String search = params.containsKey("search") ? params.get("search").get(0).toLowerCase() : "";
+        int page;
+        int pageSize;
+        try {
+            page = parseIntParam(params, "page", 0, 0, Integer.MAX_VALUE);
+            pageSize = parseIntParam(params, "pageSize", DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE);
+        } catch (IllegalArgumentException e) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST, 
+                    errorJson("Invalid pagination parameters"), headers);
+            return;
+        }
+
+        runOnServerThread(ctx, headers, () -> {
+            WebTerminalBlockEntity terminal = getConnectedTerminal();
+            if (terminal == null) {
+                sendJsonResponse(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE, 
+                        errorJson("No connected terminal available"), headers);
+                return;
+            }
+
+            List<ItemStackDTO> items = filterItems(terminal.getNetworkInventory(), search);
+            List<ItemStackDTO> sortedItems = sortByAmount(items);
+            List<ItemStackDTO> pageItems = paginate(sortedItems, page, pageSize);
+
+            int total = sortedItems.size();
+            int totalPages = Math.max(1, (total + pageSize - 1) / pageSize);
+            Map<String, Object> response = Map.of(
+                    "items", pageItems,
+                    "total", total,
+                    "page", page,
+                    "pageSize", pageSize,
+                    "totalPages", totalPages
+            );
+
+            sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(response), headers);
+        });
+    }
+
+    private WebTerminalBlockEntity getConnectedTerminal() {
+        WebTerminalBlockEntity terminal = WebServer.getInstance().getFirstTerminal();
+        if (terminal == null) {
+            return null;
+        }
+        return terminal.isConnectedToGrid() ? terminal : null;
+    }
+
+    private List<ItemStackDTO> filterItems(Map<AEKey, Long> inventory, String searchLower) {
+        return inventory.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
+                .filter(entry -> entry.getKey() instanceof AEItemKey)
+                .map(entry -> Map.entry((AEItemKey) entry.getKey(), entry.getValue()))
+                .filter(entry -> matchesSearch(entry.getKey(), searchLower))
+                .map(entry -> new ItemStackDTO(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    private boolean matchesSearch(AEItemKey itemKey, String searchLower) {
+        if (searchLower.isEmpty()) {
+            return true;
+        }
+        String name = itemKey.getDisplayName().getString().toLowerCase();
+        String id = itemKey.getId().toString().toLowerCase();
+        return name.contains(searchLower) || id.contains(searchLower);
+    }
+
+    private List<ItemStackDTO> sortByAmount(List<ItemStackDTO> items) {
+        return items.stream()
+                .sorted(Comparator.comparingLong(ItemStackDTO::getAmount).reversed())
+                .toList();
+    }
+
+    private <T> List<T> paginate(List<T> items, int page, int pageSize) {
+        long startLong = (long) page * pageSize;
+        if (startLong >= items.size() || startLong > Integer.MAX_VALUE) {
+            return List.of();
+        }
+
+        int start = (int) startLong;
+        int end = Math.min(start + pageSize, items.size());
+        return items.subList(start, end);
+    }
+
+    private void handleCraft(ChannelHandlerContext ctx, String body, HttpHeaders headers) {
+        sendJsonResponse(ctx, HttpResponseStatus.NOT_IMPLEMENTED, 
+                errorJson("Not Implemented"), headers);
+    }
+
+    private void handleCpus(ChannelHandlerContext ctx, HttpHeaders headers) {
+        sendJsonResponse(ctx, HttpResponseStatus.NOT_IMPLEMENTED, 
+                errorJson("Not Implemented"), headers);
+    }
+
+    private void serveStaticFile(ChannelHandlerContext ctx, String filename, String contentType, HttpHeaders headers) {
+        try {
+            InputStream is = getClass().getClassLoader().getResourceAsStream("web/" + filename);
+            if (is == null) {
+                sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, 
+                        errorJson("File not found: " + filename), headers);
+                return;
+            }
+
+            String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            is.close();
+
+            headers.set(HttpHeaderNames.CONTENT_TYPE, contentType + "; charset=UTF-8");
+            sendResponse(ctx, HttpResponseStatus.OK, content, headers);
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.error("Error serving static file: {}", filename, e);
+            sendJsonResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, 
+                    errorJson("Error serving file"), headers);
+        }
+    }
+
+    private String errorJson(String message) {
+        JsonObject error = new JsonObject();
+        error.addProperty("error", message);
+        return GSON.toJson(error);
+    }
+
+    private void sendJsonResponse(ChannelHandlerContext ctx, HttpResponseStatus status, 
+                                   String content, HttpHeaders headers) {
+        headers.set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
+        sendResponse(ctx, status, content, headers);
+    }
+
+    private void sendResponse(ChannelHandlerContext ctx, HttpResponseStatus status, 
+                               String content, HttpHeaders headers) {
+        ByteBuf buf = Unpooled.copiedBuffer(content, CharsetUtil.UTF_8);
+        FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, buf);
+        response.headers().add(headers);
+        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, buf.readableBytes());
+        ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+    }
+
+    private int parseIntParam(Map<String, List<String>> params, String name, int defaultValue, int min, int max) {
+        if (!params.containsKey(name)) {
+            return defaultValue;
+        }
+
+        String raw = params.get(name).get(0);
+        int value;
+        try {
+            value = Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid number");
+        }
+
+        if (value < min || value > max) {
+            throw new IllegalArgumentException("Out of range");
+        }
+
+        return value;
+    }
+
+    private void runOnServerThread(ChannelHandlerContext ctx, HttpHeaders headers, Runnable task) {
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) {
+            sendJsonResponse(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE, 
+                    errorJson("Server not available"), headers);
+            return;
+        }
+
+        server.execute(() -> executeSafely(ctx, headers, task));
+    }
+
+    private void executeSafely(ChannelHandlerContext ctx, HttpHeaders headers, Runnable task) {
+        try {
+            task.run();
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.error("Error handling API request", e);
+            sendJsonResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, 
+                    errorJson("Internal Server Error"), headers);
+        }
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        AE2WebMod.LOGGER.error("HTTP handler error", cause);
+        ctx.close();
+    }
+}

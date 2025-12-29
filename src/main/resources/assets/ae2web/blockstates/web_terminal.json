@@ -1,0 +1,7 @@
+{
+    "variants": {
+        "": {
+            "model": "ae2web:block/web_terminal"
+        }
+    }
+}
