@@ -80,6 +80,9 @@ repositories {
     mavenCentral()
 }
 
+// Netty HTTP version - must be compatible with Forge's Netty
+def nettyHttpVersion = '4.1.82.Final'
+
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
@@ -90,9 +93,14 @@ dependencies {
     // Gson for JSON handling
     implementation 'com.google.code.gson:gson:2.10.1'
     
-    // Netty HTTP codec for web server
-    implementation 'io.netty:netty-codec-http:4.1.82.Final'
+    // Netty HTTP codec for web server - use jarJar to embed in mod
+    // Version must match Minecraft's bundled Netty (4.1.x), not 5.x
+    implementation "io.netty:netty-codec-http:${nettyHttpVersion}"
+    jarJar(group: 'io.netty', name: 'netty-codec-http', version: "[${nettyHttpVersion},4.2)")
 }
+
+// Configure jarJar task
+jarJar.enable()
 
 tasks.named('processResources', ProcessResources).configure {
     var replaceProperties = [
@@ -129,6 +137,11 @@ tasks.named('jar', Jar).configure {
         ])
     }
     finalizedBy 'reobfJar'
+}
+
+// Make sure jarJar is also reobfuscated
+tasks.named('jarJar', net.minecraftforge.gradle.userdev.tasks.JarJar).configure {
+    finalizedBy 'reobfJarJar'
 }
 
 publishing {
