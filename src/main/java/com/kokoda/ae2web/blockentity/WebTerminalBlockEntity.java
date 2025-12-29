@@ -3,11 +3,9 @@ package com.kokoda.ae2web.blockentity;
 import appeng.api.networking.*;
 import appeng.api.networking.crafting.ICraftingService;
 import appeng.api.networking.security.IActionSource;
-import appeng.api.networking.storage.IStorageService;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.KeyCounter;
-import appeng.api.storage.MEStorage;
 import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.registry.ModBlockEntities;
 import com.kokoda.ae2web.registry.ModBlocks;
@@ -28,9 +26,6 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
     private IManagedGridNode mainNode;
     private String terminalId;
     private boolean isConnected = false;
-    private Map<AEKey, Long> cachedInventory = Collections.emptyMap();
-    private long lastInventoryRefresh = 0L;
-    private static final long INVENTORY_CACHE_MS = 1000L;
 
     public WebTerminalBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.WEB_TERMINAL.get(), pos, state);
@@ -54,8 +49,6 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
                 AE2WebMod.LOGGER.info("Web Terminal {} connected to ME network at {}", terminalId, worldPosition);
             } else {
                 WebServer.getInstance().unregisterTerminal(this);
-                cachedInventory = Collections.emptyMap();
-                lastInventoryRefresh = 0L;
                 AE2WebMod.LOGGER.info("Web Terminal {} disconnected from ME network", terminalId);
             }
         }
@@ -96,48 +89,31 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
     }
 
     /**
-     * Get all items stored in the ME network
+     * Get all items stored in the ME network.
+     * Uses AE2's cached inventory which updates once per tick for better performance.
      */
     public Map<AEKey, Long> getNetworkInventory() {
         if (!isConnectedToGrid()) {
             return Collections.emptyMap();
         }
 
-        long now = System.currentTimeMillis();
-        if ((now - lastInventoryRefresh) < INVENTORY_CACHE_MS) {
-            return new HashMap<>(cachedInventory);
-        }
-
-        Map<AEKey, Long> inventory = queryNetworkInventory();
-        cachedInventory = new HashMap<>(inventory);
-        lastInventoryRefresh = now;
-        return new HashMap<>(inventory);
-    }
-
-    private Map<AEKey, Long> queryNetworkInventory() {
         try {
             IGrid grid = mainNode.getGrid();
             if (grid == null) {
                 return Collections.emptyMap();
             }
 
-            IStorageService storageService = grid.getService(IStorageService.class);
-            MEStorage storage = storageService.getInventory();
-            return getAvailableItems(storage);
+            // Use AE2's built-in cached inventory (updates once per tick)
+            KeyCounter cachedInventory = grid.getStorageService().getCachedInventory();
+            return StreamSupport.stream(cachedInventory.spliterator(), false)
+                    .filter(AEItemKey.class::isInstance)
+                    .map(AEItemKey.class::cast)
+                    .filter(key -> cachedInventory.get(key) > 0)
+                    .collect(Collectors.toMap(key -> key, cachedInventory::get));
         } catch (Exception e) {
             AE2WebMod.LOGGER.error("Error getting network inventory", e);
             return Collections.emptyMap();
         }
-    }
-
-    private Map<AEKey, Long> getAvailableItems(MEStorage storage) {
-        KeyCounter availableStacks = storage.getAvailableStacks();
-        return StreamSupport.stream(availableStacks.spliterator(), false)
-                .filter(AEItemKey.class::isInstance)
-                .map(AEItemKey.class::cast)
-                .map(key -> Map.entry((AEKey) key, availableStacks.get(key)))
-                .filter(entry -> entry.getValue() > 0)
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     /**
@@ -145,11 +121,11 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
      */
     public ICraftingService getCraftingService() {
         if (!isConnectedToGrid()) return null;
-        
+
         try {
             IGrid grid = mainNode.getGrid();
             if (grid != null) {
-                return grid.getService(ICraftingService.class);
+                return grid.getCraftingService();
             }
         } catch (Exception e) {
             AE2WebMod.LOGGER.error("Error getting crafting service", e);
@@ -181,8 +157,6 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
             mainNode = null;
         }
         WebServer.getInstance().unregisterTerminal(this);
-        cachedInventory = Collections.emptyMap();
-        lastInventoryRefresh = 0L;
     }
 
     @Override
@@ -213,7 +187,5 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
             mainNode = null;
         }
         WebServer.getInstance().unregisterTerminal(this);
-        cachedInventory = Collections.emptyMap();
-        lastInventoryRefresh = 0L;
     }
 }
