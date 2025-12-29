@@ -26,7 +26,7 @@ AE2 Web Terminal is a Minecraft Forge mod (1.20.1) that adds a Web Terminal bloc
 - `blockentity/WebTerminalBlockEntity.java` - Manages AE2 ME network connection via `IGridNodeListener`, provides `getNetworkInventory()` and `getCraftingService()`
 - `web/WebServer.java` - Netty HTTP server (default port 8080), maintains thread-safe registry of connected terminals
 - `web/handlers/ApiHandler.java` - HTTP request router serving static files and API endpoints
-- `web/dto/` - Data transfer objects for JSON serialization (ItemStackDTO, CraftRequestDTO)
+- `web/dto/` - Data transfer objects for JSON serialization (ItemStackDTO)
 - `registry/` - Forge deferred registries for blocks, items, block entities
 - `config/AE2WebConfig.java` - Server config (httpPort, enableAuth, authToken)
 
@@ -49,9 +49,27 @@ AE2 Web Terminal is a Minecraft Forge mod (1.20.1) that adds a Web Terminal bloc
 
 ## Known TODOs in Codebase
 
-- Crafting request implementation in ApiHandler.java
-- CPU status implementation in ApiHandler.java
-- Craftable flag checking in ItemStackDTO.java
+- Crafting request implementation in ApiHandler.java (currently returns 501)
+- CPU status implementation in ApiHandler.java (currently returns 501)
+
+## Version Control & Semantic Versioning
+
+**Current Version:** 1.0.0 (established at first commit)
+
+版本号遵循语义化版本规范 (SemVer):
+- **MAJOR (X.0.0)**: 不兼容的 API 变更
+- **MINOR (0.X.0)**: 向后兼容的新功能
+- **PATCH (0.0.X)**: 向后兼容的 bug 修复
+
+版本号位置:
+- `build.gradle` 中的 `version` 字段
+- `src/main/resources/META-INF/mods.toml` 中的 `version` 字段
+
+**Commit 规范:**
+- 在合适的时机提交代码（功能完成、bug 修复、重构完成等）
+- 根据变更类型更新版本号
+- Commit message 应清晰描述变更内容
+- 使用 Co-Authored-By 标注 AI 工具的贡献
 
 ## Automation Tasks & TODO.md
 File: keep a single docs/TODO.md to track phased tasks.
