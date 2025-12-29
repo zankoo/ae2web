@@ -18,6 +18,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
 import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.server.ServerLifecycleHooks;
 
 import java.io.InputStream;
@@ -108,9 +109,20 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             JsonObject status = new JsonObject();
             status.addProperty("running", true);
             status.addProperty("terminals", WebServer.getInstance().getTerminals().size());
-            status.addProperty("version", "1.0.0");
+            status.addProperty("version", getModVersion());
             sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(status), headers);
         });
+    }
+
+    private static String getModVersion() {
+        try {
+            return ModList.get()
+                    .getModContainerById(AE2WebMod.MOD_ID)
+                    .map(container -> container.getModInfo().getVersion().toString())
+                    .orElse("unknown");
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     private void handleTerminals(ChannelHandlerContext ctx, HttpHeaders headers) {

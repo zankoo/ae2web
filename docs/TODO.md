@@ -2,12 +2,12 @@
 
 ## Pending
 
-- [ ] MED-1: Update version string in ApiHandler.java handleStatus() from hardcoded "1.0.0" to read from mod metadata
-
 ## In Progress
 
 ## Completed
 
+- [x] HIGH-1: Change debug log to info level in getNetworkInventory() in WebTerminalBlockEntity.java - change LOGGER.debug to LOGGER.info for inventory fetch logging
+- [x] MED-1: Update version string in ApiHandler.java handleStatus() from hardcoded "1.0.0" to read from mod metadata
 - [x] TASTE-1: Delete dead code - removed ItemStackDTO.craftable field, deleted CraftRequestDTO.java, cleaned up web UI
 - [x] TASTE-2: Fix hardcoded URL/port in WebTerminalBlock - now uses AE2WebConfig.getHttpPort(), ChatFormatting
 - [x] TASTE-3: Extract terminal check helper in ApiHandler - created getConnectedTerminal() method

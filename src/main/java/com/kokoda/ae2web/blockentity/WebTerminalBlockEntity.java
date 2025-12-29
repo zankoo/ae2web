@@ -113,7 +113,7 @@ public class WebTerminalBlockEntity extends BlockEntity implements IGridNodeList
                     result.put(entry.getKey(), entry.getLongValue());
                 }
             }
-            AE2WebMod.LOGGER.debug(
+            AE2WebMod.LOGGER.info(
                     "Network inventory fetched for terminal {} at {}: {} keys (filtered to {} item keys)",
                     terminalId, worldPosition, availableStacks.size(), result.size());
             return result;
