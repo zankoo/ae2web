@@ -28,6 +28,8 @@
 - [x] MED-7: Optimize inventory query - add caching
 - [x] MED-8: Implement /api/craft endpoint or return 501 Not Implemented
 - [x] MED-9: Implement /api/cpus endpoint or return 501 Not Implemented
+- [x] HIGH-4: Implement /api/craft endpoint - beginCraftingCalculation + submitJob with missing-items reporting
+- [x] MED-10: Implement /api/cpus endpoint - return crafting CPU status
 - [x] HIGH-1: Fix getNetworkInventory() returning empty - change from getCachedInventory() to getInventory().getAvailableStacks() in WebTerminalBlockEntity.java
 - [x] HIGH-2: Add debug logging in getNetworkInventory() to log inventory size before returning
 

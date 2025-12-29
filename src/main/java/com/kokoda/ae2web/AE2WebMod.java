@@ -1,6 +1,5 @@
 package com.kokoda.ae2web;
 
-import appeng.api.networking.IInWorldGridNodeHost;
 import com.kokoda.ae2web.registry.ModBlockEntities;
 import com.kokoda.ae2web.registry.ModBlocks;
 import com.kokoda.ae2web.registry.ModCreativeTabs;
@@ -12,7 +11,6 @@ import com.kokoda.ae2web.web.WebServer;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -40,7 +38,6 @@ public class AE2WebMod {
 
         // Register setup methods
         modEventBus.addListener(this::commonSetup);
-        modEventBus.addListener(this::registerCapabilities);
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> modEventBus.addListener(ClientSetup::onClientSetup));
 
         // Register ourselves for server and other game events
@@ -51,10 +48,6 @@ public class AE2WebMod {
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         CommonSetup.init(event);
-    }
-
-    private void registerCapabilities(RegisterCapabilitiesEvent event) {
-        event.register(IInWorldGridNodeHost.class);
     }
 
     @SubscribeEvent

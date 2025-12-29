@@ -49,8 +49,7 @@ AE2 Web Terminal is a Minecraft Forge mod (1.20.1) that adds a Web Terminal bloc
 
 ## Known TODOs in Codebase
 
-- Crafting request implementation in ApiHandler.java (currently returns 501)
-- CPU status implementation in ApiHandler.java (currently returns 501)
+- Crafting request UX: expose terminal selection / CPU selection in API + UI
 
 ## Version Control & Semantic Versioning
 
