@@ -8,6 +8,7 @@
 
 ## Completed
 
+- [x] FEAT-1: Implement client-side prerender architecture - auto-render item icons on player join, upload to server
 - [x] FIX-1: Update CDN URLs to match mod target (1.20.1) - lang JSON uses 1.20.1; item icon CDN uses 1.20.2 as closest available dataset
 - [x] PERF-2: Avoid double request for missing icons - app.js uses image onerror + server error TTL, no extra fetch to detect 404
 - [x] BUG-2: Fix translation loading race condition - loadMinecraftTranslations() returns null while loading, store promise instead

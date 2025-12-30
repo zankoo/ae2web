@@ -11,6 +11,7 @@ import com.kokoda.ae2web.web.assets.ItemIconService;
 import com.kokoda.ae2web.web.assets.ResourceLocator;
 import com.kokoda.ae2web.web.assets.TranslationService;
 import com.kokoda.ae2web.web.dto.ItemStackDTO;
+import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
 import appeng.api.networking.crafting.CalculationStrategy;
 import appeng.api.networking.crafting.CraftingSubmitErrorCode;
 import appeng.api.networking.crafting.CraftingJobStatus;
@@ -131,6 +132,8 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             handleCraft(ctx, body, headers, lang);
         } else if (path.equals("/api/cpus")) {
             handleCpus(ctx, headers, lang);
+        } else if (path.startsWith("/api/prerender/")) {
+            handlePrerenderRequest(ctx, request, path, method, params, headers);
         } else {
             sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, 
                     errorJson("API endpoint not found: " + path), headers);
@@ -672,6 +675,234 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         headers.set(HttpHeaderNames.CONTENT_TYPE, "image/png");
         headers.set(HttpHeaderNames.CACHE_CONTROL, "public, max-age=86400");
         sendBinaryResponse(ctx, HttpResponseStatus.OK, png.get(), headers);
+    }
+
+    // ============ Prerender Endpoints ============
+
+    private void handlePrerenderRequest(ChannelHandlerContext ctx, FullHttpRequest request,
+                                         String path, HttpMethod method,
+                                         Map<String, List<String>> params, HttpHeaders headers) {
+        if (!AE2WebConfig.isPrerenderEnabled()) {
+            sendJsonResponse(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE,
+                    errorJson("Prerendering is disabled"), headers);
+            return;
+        }
+
+        if (path.equals("/api/prerender/missing")) {
+            handlePrerenderMissing(ctx, params, headers);
+        } else if (path.equals("/api/prerender/upload") && method == HttpMethod.POST) {
+            String body = request.content().toString(CharsetUtil.UTF_8);
+            handlePrerenderUpload(ctx, body, headers);
+        } else if (path.equals("/api/prerender/image")) {
+            handlePrerenderImage(ctx, params, headers);
+        } else if (path.equals("/api/prerender/claim") && method == HttpMethod.POST) {
+            String body = request.content().toString(CharsetUtil.UTF_8);
+            handlePrerenderClaim(ctx, body, headers);
+        } else if (path.equals("/api/prerender/stats")) {
+            handlePrerenderStats(ctx, headers);
+        } else if (path.equals("/api/prerender/check") && method == HttpMethod.POST) {
+            String body = request.content().toString(CharsetUtil.UTF_8);
+            handlePrerenderCheck(ctx, body, headers);
+        } else {
+            sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND,
+                    errorJson("Prerender endpoint not found: " + path), headers);
+        }
+    }
+
+    private void handlePrerenderMissing(ChannelHandlerContext ctx,
+                                         Map<String, List<String>> params, HttpHeaders headers) {
+        String namespace = getFirstParam(params, "namespace");
+        int limit;
+        try {
+            limit = parseIntParam(params, "limit", 100, 1, 1000);
+        } catch (IllegalArgumentException e) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Invalid limit parameter"), headers);
+            return;
+        }
+
+        runOnServerThread(ctx, headers, () -> {
+            PrerenderStorageService storage = PrerenderStorageService.getInstance();
+            storage.initialize();
+
+            List<String> missing = storage.getMissingIcons(namespace, limit);
+            Map<String, Integer> stats = storage.getStats();
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("missing", missing);
+            response.put("total", stats.get("totalItems"));
+            response.put("renderedCount", stats.get("renderedCount"));
+            response.put("hasMore", missing.size() >= limit);
+
+            sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(response), headers);
+        });
+    }
+
+    private void handlePrerenderUpload(ChannelHandlerContext ctx, String body, HttpHeaders headers) {
+        if (body == null || body.isBlank()) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Request body required"), headers);
+            return;
+        }
+
+        JsonObject json;
+        try {
+            json = GSON.fromJson(body, JsonObject.class);
+        } catch (Exception e) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Invalid JSON"), headers);
+            return;
+        }
+
+        if (json == null || !json.has("itemId") || !json.has("png")) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Missing itemId or png"), headers);
+            return;
+        }
+
+        String itemId = json.get("itemId").getAsString();
+        String pngBase64 = json.get("png").getAsString();
+
+        if (itemId == null || itemId.isBlank()) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Invalid itemId"), headers);
+            return;
+        }
+
+        byte[] pngData;
+        try {
+            pngData = Base64.getDecoder().decode(pngBase64);
+        } catch (IllegalArgumentException e) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Invalid base64 encoding"), headers);
+            return;
+        }
+
+        PrerenderStorageService storage = PrerenderStorageService.getInstance();
+        storage.initialize();
+
+        if (storage.saveIcon(itemId, pngData)) {
+            JsonObject response = new JsonObject();
+            response.addProperty("status", "saved");
+            response.addProperty("itemId", itemId);
+            sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(response), headers);
+        } else {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Failed to save icon"), headers);
+        }
+    }
+
+    private void handlePrerenderImage(ChannelHandlerContext ctx,
+                                       Map<String, List<String>> params, HttpHeaders headers) {
+        String id = getFirstParam(params, "id");
+        if (id == null || id.isBlank()) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST, errorJson("Missing id"), headers);
+            return;
+        }
+
+        PrerenderStorageService storage = PrerenderStorageService.getInstance();
+        storage.initialize();
+
+        byte[] png = storage.getIcon(id);
+        if (png == null) {
+            sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, errorJson("Icon not found"), headers);
+            return;
+        }
+
+        headers.set(HttpHeaderNames.CONTENT_TYPE, "image/png");
+        headers.set(HttpHeaderNames.CACHE_CONTROL, "public, max-age=86400");
+        sendBinaryResponse(ctx, HttpResponseStatus.OK, png, headers);
+    }
+
+    private void handlePrerenderClaim(ChannelHandlerContext ctx, String body, HttpHeaders headers) {
+        if (body == null || body.isBlank()) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Request body required"), headers);
+            return;
+        }
+
+        JsonObject json;
+        try {
+            json = GSON.fromJson(body, JsonObject.class);
+        } catch (Exception e) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Invalid JSON"), headers);
+            return;
+        }
+
+        if (json == null || !json.has("itemIds") || !json.has("clientId")) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Missing itemIds or clientId"), headers);
+            return;
+        }
+
+        String clientId = json.get("clientId").getAsString();
+        List<String> requestedIds = new ArrayList<>();
+        json.get("itemIds").getAsJsonArray().forEach(e -> requestedIds.add(e.getAsString()));
+
+        PrerenderStorageService storage = PrerenderStorageService.getInstance();
+        storage.initialize();
+
+        List<String> claimed = storage.claimItemsForRendering(requestedIds, clientId);
+
+        JsonObject response = new JsonObject();
+        response.add("claimed", GSON.toJsonTree(claimed));
+        response.addProperty("claimedCount", claimed.size());
+        sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(response), headers);
+    }
+
+    private void handlePrerenderStats(ChannelHandlerContext ctx, HttpHeaders headers) {
+        runOnServerThread(ctx, headers, () -> {
+            PrerenderStorageService storage = PrerenderStorageService.getInstance();
+            storage.initialize();
+
+            Map<String, Integer> stats = storage.getStats();
+            sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(stats), headers);
+        });
+    }
+
+    private void handlePrerenderCheck(ChannelHandlerContext ctx, String body, HttpHeaders headers) {
+        if (body == null || body.isBlank()) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Request body required"), headers);
+            return;
+        }
+
+        JsonObject json;
+        try {
+            json = GSON.fromJson(body, JsonObject.class);
+        } catch (Exception e) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Invalid JSON"), headers);
+            return;
+        }
+
+        if (json == null || !json.has("itemIds")) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Missing itemIds"), headers);
+            return;
+        }
+
+        List<String> itemIds = new ArrayList<>();
+        json.get("itemIds").getAsJsonArray().forEach(e -> itemIds.add(e.getAsString()));
+
+        PrerenderStorageService storage = PrerenderStorageService.getInstance();
+        storage.initialize();
+
+        List<String> existing = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        for (String id : itemIds) {
+            if (storage.hasIcon(id)) {
+                existing.add(id);
+            } else {
+                missing.add(id);
+            }
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("existing", existing);
+        response.put("missing", missing);
+        sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(response), headers);
     }
 
     private static String resolveRequestLang(FullHttpRequest request, Map<String, List<String>> params) {

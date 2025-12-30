@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.kokoda.ae2web.AE2WebMod;
+import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,6 +34,15 @@ public final class ItemIconService {
     }
 
     public Optional<byte[]> getItemIconPng(ResourceLocation itemId) {
+        // Check prerendered icons first (highest priority)
+        PrerenderStorageService prerenderStorage = PrerenderStorageService.getInstance();
+        prerenderStorage.initialize();
+        byte[] prerendered = prerenderStorage.getIcon(itemId);
+        if (prerendered != null) {
+            return Optional.of(prerendered);
+        }
+
+        // Fall back to JAR-extracted icons
         String key = itemId.toString();
         synchronized (cache) {
             Optional<byte[]> cached = cache.get(key);

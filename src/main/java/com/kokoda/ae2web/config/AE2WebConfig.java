@@ -13,6 +13,12 @@ public class AE2WebConfig {
     public static final ForgeConfigSpec.ConfigValue<String> AUTH_TOKEN;
     public static final ForgeConfigSpec.BooleanValue ENABLE_AUTH;
 
+    // Prerender settings
+    public static final ForgeConfigSpec.BooleanValue PRERENDER_ENABLED;
+    public static final ForgeConfigSpec.IntValue PRERENDER_MAX_UPLOAD_SIZE;
+    public static final ForgeConfigSpec.IntValue PRERENDER_CACHE_SIZE;
+    public static final ForgeConfigSpec.IntValue PRERENDER_AUTO_MAX_ITEMS;
+
     static {
         BUILDER.push("server");
 
@@ -31,7 +37,27 @@ public class AE2WebConfig {
         AUTH_TOKEN = BUILDER
                 .comment("Authentication token for API access (set your own secure token)")
                 .define("authToken", "change-me-to-a-secure-token");
-        
+
+        BUILDER.pop();
+
+        BUILDER.push("prerender");
+
+        PRERENDER_ENABLED = BUILDER
+                .comment("Enable client-side pre-rendering of item icons")
+                .define("enabled", true);
+
+        PRERENDER_MAX_UPLOAD_SIZE = BUILDER
+                .comment("Maximum size in bytes for uploaded PNG icons (default 64KB)")
+                .defineInRange("maxUploadSize", 65536, 1024, 262144);
+
+        PRERENDER_CACHE_SIZE = BUILDER
+                .comment("Number of pre-rendered icons to cache in memory")
+                .defineInRange("cacheSize", 1024, 100, 10000);
+
+        PRERENDER_AUTO_MAX_ITEMS = BUILDER
+                .comment("Maximum number of items to auto-render when player joins")
+                .defineInRange("autoMaxItems", 500, 10, 5000);
+
         BUILDER.pop();
         SPEC = BUILDER.build();
     }
@@ -54,5 +80,21 @@ public class AE2WebConfig {
 
     public static String getAuthToken() {
         return AUTH_TOKEN.get();
+    }
+
+    public static boolean isPrerenderEnabled() {
+        return PRERENDER_ENABLED.get();
+    }
+
+    public static int getPrerenderMaxUploadSize() {
+        return PRERENDER_MAX_UPLOAD_SIZE.get();
+    }
+
+    public static int getPrerenderCacheSize() {
+        return PRERENDER_CACHE_SIZE.get();
+    }
+
+    public static int getPrerenderAutoMaxItems() {
+        return PRERENDER_AUTO_MAX_ITEMS.get();
     }
 }
