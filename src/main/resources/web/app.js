@@ -5,6 +5,7 @@ let totalPages = 1;
 let currentSearch = '';
 let selectedItem = null;
 let refreshInterval = null;
+let currentLang = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -12,6 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initApp() {
+    currentLang = getInitialLang();
+
     // Set up event listeners
     document.getElementById('search-input').addEventListener('keyup', (e) => {
         if (e.key === 'Enter') {
@@ -43,6 +46,7 @@ async function apiCall(endpoint, options = {}) {
             ...options,
             headers: {
                 'Content-Type': 'application/json',
+                'X-AE2Web-Lang': currentLang || 'en_us',
                 ...options.headers
             }
         });
@@ -157,7 +161,13 @@ function renderItems(data) {
 
     grid.innerHTML = data.items.map(item => `
         <div class="item-card" onclick="openCraftModal('${escapeHtml(item.id)}', '${escapeHtml(item.name)}')">
-            <div class="item-icon">${getItemEmoji(item.namespace)}</div>
+            <div class="item-icon">
+                <img class="item-icon-img" loading="lazy"
+                     src="/api/item-icon?id=${encodeURIComponent(item.id)}"
+                     onload="this.nextElementSibling.style.display='none'"
+                     onerror="this.style.display='none'">
+                <span class="item-emoji">${getItemEmoji(item.namespace)}</span>
+            </div>
             <div class="item-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
             <div class="item-id" title="${escapeHtml(item.id)}">${escapeHtml(item.id)}</div>
             <div class="item-amount">${formatNumber(item.amount)}</div>
@@ -253,6 +263,32 @@ function getItemEmoji(namespace) {
         'botania': '🌸'
     };
     return emojis[namespace] || '📦';
+}
+
+function getInitialLang() {
+    const url = new URL(window.location.href);
+    const fromQuery = url.searchParams.get('lang');
+    const fromStorage = localStorage.getItem('ae2web.lang');
+    const fromNavigator = navigator.language || 'en-US';
+
+    const lang = normalizeMcLang(fromQuery || fromStorage || fromNavigator);
+    localStorage.setItem('ae2web.lang', lang);
+    return lang;
+}
+
+function normalizeMcLang(value) {
+    if (!value) return 'en_us';
+
+    const raw = value.toLowerCase().replace('-', '_');
+    if (raw.startsWith('zh')) {
+        // Default Chinese locale to mainland unless explicitly TW/HK
+        if (raw.includes('tw') || raw.includes('hk')) return 'zh_tw';
+        return 'zh_cn';
+    }
+    if (raw.startsWith('en')) return 'en_us';
+
+    // Best-effort: many MC lang codes match this pattern (e.g. ja_jp, pt_br)
+    return raw.replace(/[^a-z0-9_]/g, '') || 'en_us';
 }
 
 function showToast(message, type = 'info') {

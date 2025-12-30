@@ -7,6 +7,9 @@ import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import com.kokoda.ae2web.config.AE2WebConfig;
 import com.kokoda.ae2web.web.WebServer;
+import com.kokoda.ae2web.web.assets.ItemIconService;
+import com.kokoda.ae2web.web.assets.ResourceLocator;
+import com.kokoda.ae2web.web.assets.TranslationService;
 import com.kokoda.ae2web.web.dto.ItemStackDTO;
 import appeng.api.networking.crafting.CalculationStrategy;
 import appeng.api.networking.crafting.CraftingSubmitErrorCode;
@@ -30,6 +33,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.server.ServerLifecycleHooks;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -41,6 +45,9 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final ResourceLocator RESOURCE_LOCATOR = new ResourceLocator();
+    private static final TranslationService TRANSLATIONS = new TranslationService(RESOURCE_LOCATOR);
+    private static final ItemIconService ITEM_ICONS = new ItemIconService(RESOURCE_LOCATOR);
     private static final int DEFAULT_PAGE_SIZE = 100;
     private static final int MAX_PAGE_SIZE = 500;
     private static final long MAX_CRAFT_AMOUNT = 1_000_000;
@@ -60,7 +67,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         HttpHeaders headers = new DefaultHttpHeaders();
         headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, OPTIONS");
-        headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Authorization");
+        headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Authorization, X-AE2Web-Lang");
 
         // Handle CORS preflight
         if (method == HttpMethod.OPTIONS) {
@@ -107,18 +114,21 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         QueryStringDecoder decoder = new QueryStringDecoder(uri);
         String path = decoder.path();
         Map<String, List<String>> params = decoder.parameters();
+        String lang = resolveRequestLang(request, params);
 
         if (path.equals("/api/status")) {
             handleStatus(ctx, headers);
         } else if (path.equals("/api/terminals")) {
             handleTerminals(ctx, headers);
         } else if (path.equals("/api/items")) {
-            handleItems(ctx, params, headers);
+            handleItems(ctx, params, headers, lang);
+        } else if (path.equals("/api/item-icon")) {
+            handleItemIcon(ctx, params, headers);
         } else if (path.equals("/api/craft") && method == HttpMethod.POST) {
             String body = request.content().toString(CharsetUtil.UTF_8);
-            handleCraft(ctx, body, headers);
+            handleCraft(ctx, body, headers, lang);
         } else if (path.equals("/api/cpus")) {
-            handleCpus(ctx, headers);
+            handleCpus(ctx, headers, lang);
         } else {
             sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, 
                     errorJson("API endpoint not found: " + path), headers);
@@ -169,7 +179,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         });
     }
 
-    private void handleItems(ChannelHandlerContext ctx, Map<String, List<String>> params, HttpHeaders headers) {
+    private void handleItems(ChannelHandlerContext ctx, Map<String, List<String>> params, HttpHeaders headers, String lang) {
         String search = params.containsKey("search") ? params.get("search").get(0).toLowerCase() : "";
         int page;
         int pageSize;
@@ -190,7 +200,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 return;
             }
 
-            List<ItemStackDTO> items = filterItems(terminal.getNetworkInventory(), search);
+            List<ItemStackDTO> items = filterItems(terminal.getNetworkInventory(), search, lang);
             List<ItemStackDTO> sortedItems = sortByAmount(items);
             List<ItemStackDTO> pageItems = paginate(sortedItems, page, pageSize);
 
@@ -216,21 +226,26 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         return terminal.isConnectedToGrid() ? terminal : null;
     }
 
-    private List<ItemStackDTO> filterItems(Map<AEKey, Long> inventory, String searchLower) {
+    private List<ItemStackDTO> filterItems(Map<AEKey, Long> inventory, String searchLower, String lang) {
         return inventory.entrySet().stream()
                 .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
                 .filter(entry -> entry.getKey() instanceof AEItemKey)
                 .map(entry -> Map.entry((AEItemKey) entry.getKey(), entry.getValue()))
-                .filter(entry -> matchesSearch(entry.getKey(), searchLower))
-                .map(entry -> new ItemStackDTO(entry.getKey(), entry.getValue()))
+                .filter(entry -> matchesSearch(entry.getKey(), searchLower, lang))
+                .map(entry -> {
+                    AEItemKey key = entry.getKey();
+                    String translationKey = key.getItem().getDescriptionId();
+                    String name = TRANSLATIONS.translateItemDisplayName(key, lang);
+                    return new ItemStackDTO(key, entry.getValue(), name, translationKey);
+                })
                 .toList();
     }
 
-    private boolean matchesSearch(AEItemKey itemKey, String searchLower) {
+    private boolean matchesSearch(AEItemKey itemKey, String searchLower, String lang) {
         if (searchLower.isEmpty()) {
             return true;
         }
-        String name = itemKey.getDisplayName().getString().toLowerCase();
+        String name = TRANSLATIONS.translateItemDisplayName(itemKey, lang).toLowerCase();
         String id = itemKey.getId().toString().toLowerCase();
         return name.contains(searchLower) || id.contains(searchLower);
     }
@@ -252,7 +267,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         return items.subList(start, end);
     }
 
-    private void handleCraft(ChannelHandlerContext ctx, String body, HttpHeaders headers) {
+    private void handleCraft(ChannelHandlerContext ctx, String body, HttpHeaders headers, String lang) {
         CraftRequest request;
         try {
             request = parseCraftRequest(body);
@@ -262,10 +277,10 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             return;
         }
 
-        runOnServerThread(ctx, headers, () -> executeCraftRequest(ctx, headers, request));
+        runOnServerThread(ctx, headers, () -> executeCraftRequest(ctx, headers, request, lang));
     }
 
-    private void handleCpus(ChannelHandlerContext ctx, HttpHeaders headers) {
+    private void handleCpus(ChannelHandlerContext ctx, HttpHeaders headers, String lang) {
         runOnServerThread(ctx, headers, () -> {
             WebTerminalBlockEntity terminal = getConnectedTerminal();
             if (terminal == null) {
@@ -283,7 +298,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
             List<Map<String, Object>> cpus = new ArrayList<>();
             for (ICraftingCPU cpu : craftingService.getCpus()) {
-                cpus.add(cpuToJson(cpu));
+                cpus.add(cpuToJson(cpu, lang));
             }
 
             Map<String, Object> response = Map.of(
@@ -334,7 +349,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         return new CraftRequest(itemId, amount);
     }
 
-    private void executeCraftRequest(ChannelHandlerContext ctx, HttpHeaders headers, CraftRequest request) {
+    private void executeCraftRequest(ChannelHandlerContext ctx, HttpHeaders headers, CraftRequest request, String lang) {
         WebTerminalBlockEntity terminal = getConnectedTerminal();
         if (terminal == null) {
             sendJsonResponse(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE,
@@ -420,7 +435,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 if (plan.simulation()) {
                     Map<String, Object> response = Map.of(
                             "error", "Missing items for crafting request",
-                            "missing", keyCounterToStackList(plan.missingItems())
+                            "missing", keyCounterToStackList(plan.missingItems(), lang)
                     );
                     sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST, GSON.toJson(response), headers);
                     return;
@@ -446,7 +461,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         server.execute(task);
     }
 
-    private List<Map<String, Object>> keyCounterToStackList(appeng.api.stacks.KeyCounter keyCounter) {
+    private List<Map<String, Object>> keyCounterToStackList(appeng.api.stacks.KeyCounter keyCounter, String lang) {
         List<Map<String, Object>> missing = new ArrayList<>();
         if (keyCounter == null) {
             return missing;
@@ -458,21 +473,30 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             if (key == null || amount <= 0) {
                 continue;
             }
-            missing.add(genericStackToJson(new GenericStack(key, amount)));
+            missing.add(genericStackToJson(new GenericStack(key, amount), lang));
         }
         return missing;
     }
 
-    private Map<String, Object> genericStackToJson(GenericStack stack) {
+    private Map<String, Object> genericStackToJson(GenericStack stack, String lang) {
         AEKey key = stack.what();
+        String name;
+        String translationKey = null;
+        if (key instanceof AEItemKey itemKey) {
+            translationKey = itemKey.getItem().getDescriptionId();
+            name = TRANSLATIONS.translateItemDisplayName(itemKey, lang);
+        } else {
+            name = key.getDisplayName().getString();
+        }
         return Map.of(
                 "id", key.getId().toString(),
-                "name", key.getDisplayName().getString(),
+                "name", name,
+                "translationKey", translationKey,
                 "amount", stack.amount()
         );
     }
 
-    private Map<String, Object> cpuToJson(ICraftingCPU cpu) {
+    private Map<String, Object> cpuToJson(ICraftingCPU cpu, String lang) {
         Map<String, Object> info = new HashMap<>();
         info.put("busy", cpu.isBusy());
         info.put("availableStorage", cpu.getAvailableStorage());
@@ -484,7 +508,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         if (status != null) {
             Map<String, Object> jobStatus = new HashMap<>();
             if (status.crafting() != null) {
-                jobStatus.put("crafting", genericStackToJson(status.crafting()));
+                jobStatus.put("crafting", genericStackToJson(status.crafting(), lang));
             }
             jobStatus.put("totalItems", status.totalItems());
             jobStatus.put("progress", status.progress());
@@ -508,6 +532,68 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             case CPU_TOO_SMALL -> "Crafting CPU is too small";
             case MISSING_INGREDIENT -> "Missing ingredient";
         };
+    }
+
+    private void handleItemIcon(ChannelHandlerContext ctx, Map<String, List<String>> params, HttpHeaders headers) {
+        String id = getFirstParam(params, "id");
+        if (id == null || id.isBlank()) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST, errorJson("Missing id"), headers);
+            return;
+        }
+
+        ResourceLocation itemId = ResourceLocation.tryParse(id);
+        if (itemId == null) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST, errorJson("Invalid id"), headers);
+            return;
+        }
+
+        Optional<byte[]> png = ITEM_ICONS.getItemIconPng(itemId);
+        if (png.isEmpty()) {
+            sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, errorJson("Icon not found"), headers);
+            return;
+        }
+
+        headers.set(HttpHeaderNames.CONTENT_TYPE, "image/png");
+        headers.set(HttpHeaderNames.CACHE_CONTROL, "public, max-age=86400");
+        sendBinaryResponse(ctx, HttpResponseStatus.OK, png.get(), headers);
+    }
+
+    private static String resolveRequestLang(FullHttpRequest request, Map<String, List<String>> params) {
+        String fromQuery = getFirstParam(params, "lang");
+        if (fromQuery != null) {
+            return TranslationService.normalizeLang(fromQuery).orElseGet(TRANSLATIONS::getDefaultLang);
+        }
+
+        String fromHeader = request.headers().get("X-AE2Web-Lang");
+        if (fromHeader != null) {
+            return TranslationService.normalizeLang(fromHeader).orElseGet(TRANSLATIONS::getDefaultLang);
+        }
+
+        String acceptLanguage = request.headers().get(HttpHeaderNames.ACCEPT_LANGUAGE);
+        String inferred = inferLangFromAcceptLanguage(acceptLanguage);
+        return inferred != null ? inferred : TRANSLATIONS.getDefaultLang();
+    }
+
+    private static @Nullable String getFirstParam(Map<String, List<String>> params, String name) {
+        List<String> values = params.get(name);
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        return values.get(0);
+    }
+
+    private static @Nullable String inferLangFromAcceptLanguage(@Nullable String header) {
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        String first = header.split(",")[0].trim().toLowerCase(Locale.ROOT);
+        if (first.startsWith("zh")) {
+            return "zh_cn";
+        }
+        if (first.startsWith("en")) {
+            return "en_us";
+        }
+        return null;
     }
 
     private void serveStaticFile(ChannelHandlerContext ctx, String filename, String contentType, HttpHeaders headers) {
@@ -546,6 +632,15 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private void sendResponse(ChannelHandlerContext ctx, HttpResponseStatus status, 
                                String content, HttpHeaders headers) {
         ByteBuf buf = Unpooled.copiedBuffer(content, CharsetUtil.UTF_8);
+        FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, buf);
+        response.headers().add(headers);
+        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, buf.readableBytes());
+        ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+    }
+
+    private void sendBinaryResponse(ChannelHandlerContext ctx, HttpResponseStatus status,
+                                    byte[] content, HttpHeaders headers) {
+        ByteBuf buf = Unpooled.wrappedBuffer(content);
         FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, buf);
         response.headers().add(headers);
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, buf.readableBytes());

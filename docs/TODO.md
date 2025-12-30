@@ -6,6 +6,9 @@
 
 ## Completed
 
+- [x] TASTE-10: Extract translateTranslatable() and formatArg() helper methods from TranslationService.translateComponent() to reduce nesting
+- [x] TASTE-9: Add ResourceLocator.assetExists() method and refactor ItemIconService.tryTexture() to use it instead of opening stream just to check existence
+- [x] TASTE-8: Delete redundant minecraft namespace branch in TranslationService.openLangStream() - both branches do the same thing
 - [x] HIGH-1: Fix AE2 cable connection - WebTerminalBlockEntity implements IInWorldGridNodeHost and exposes getGridNode(Direction)
 - [x] HIGH-2: Register IN_WORLD_GRID_NODE_HOST capability type - register IInWorldGridNodeHost via RegisterCapabilitiesEvent
 - [x] HIGH-3: Update grid node creation - in initializeGridNode() add .setInWorldNode(true) to the GridHelper.createManagedNode() chain

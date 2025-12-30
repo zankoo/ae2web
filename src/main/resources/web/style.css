@@ -304,6 +304,17 @@ body {
     justify-content: center;
     margin-bottom: 0.75rem;
     font-size: 1.5rem;
+    position: relative;
+}
+
+.item-icon-img {
+    width: 32px;
+    height: 32px;
+    image-rendering: pixelated;
+}
+
+.item-emoji {
+    line-height: 1;
 }
 
 .item-name {

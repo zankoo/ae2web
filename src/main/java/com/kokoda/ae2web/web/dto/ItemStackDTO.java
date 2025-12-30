@@ -6,14 +6,16 @@ import net.minecraft.resources.ResourceLocation;
 public class ItemStackDTO {
     private final String id;
     private final String name;
+    private final String translationKey;
     private final long amount;
     private final String namespace;
 
-    public ItemStackDTO(AEItemKey key, long amount) {
+    public ItemStackDTO(AEItemKey key, long amount, String name, String translationKey) {
         ResourceLocation itemId = key.getId();
         this.id = itemId.toString();
         this.namespace = itemId.getNamespace();
-        this.name = key.getDisplayName().getString();
+        this.name = name;
+        this.translationKey = translationKey;
         this.amount = amount;
     }
 
@@ -23,6 +25,10 @@ public class ItemStackDTO {
 
     public String getName() {
         return name;
+    }
+
+    public String getTranslationKey() {
+        return translationKey;
     }
 
     public long getAmount() {
