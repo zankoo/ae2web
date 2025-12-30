@@ -23,10 +23,18 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class TranslationService {
     private static final Gson GSON = new Gson();
+    // Known mod namespaces that provide translations - searched in order as fallback
+    private static final String[] KNOWN_NAMESPACES = {"gtceu", "minecraft", "ae2", "ae2web"};
+    // GTCEu-specific translation key prefixes that don't follow type.namespace.path pattern
+    private static final Set<String> GTCEU_PREFIXES = Set.of(
+            "tagprefix", "material", "ore", "config", "behavior", "cover",
+            "recipe", "metaitem", "multiblock", "terminal", "compass"
+    );
 
     private final ResourceLocator resources;
     private final ConcurrentHashMap<String, Map<String, String>> cache = new ConcurrentHashMap<>();
@@ -98,13 +106,17 @@ public final class TranslationService {
     private Map<String, String> loadLang(String namespace, String lang) {
         String cacheKey = namespace + ":" + lang;
         return cache.computeIfAbsent(cacheKey, ignored -> {
+            String langPath = namespace + "/lang/" + lang + ".json";
+            AE2WebMod.LOGGER.info("[TranslationService] Attempting to load language file: {}", langPath);
             try (InputStream is = openLangStream(namespace, lang).orElse(null)) {
                 if (is == null) {
+                    AE2WebMod.LOGGER.info("[TranslationService] Language file not found: {}", langPath);
                     return Collections.emptyMap();
                 }
                 try (InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                     JsonObject root = GSON.fromJson(reader, JsonObject.class);
                     if (root == null) {
+                        AE2WebMod.LOGGER.info("[TranslationService] Language file empty or invalid JSON: {}", langPath);
                         return Collections.emptyMap();
                     }
                     Map<String, String> map = new HashMap<>(root.size());
@@ -113,9 +125,11 @@ public final class TranslationService {
                             map.put(entry.getKey(), entry.getValue().getAsString());
                         }
                     }
+                    AE2WebMod.LOGGER.info("[TranslationService] Successfully loaded {} translation keys from: {}", map.size(), langPath);
                     return map;
                 }
             } catch (Exception e) {
+                AE2WebMod.LOGGER.info("[TranslationService] Failed to load language file: {} - {}", langPath, e.getMessage());
                 AE2WebMod.LOGGER.debug("Failed to load lang {}/lang/{}.json", namespace, lang, e);
                 return Collections.emptyMap();
             }
@@ -158,6 +172,10 @@ public final class TranslationService {
         String namespace = inferNamespaceFromTranslationKey(key);
 
         String template = translateKey(namespace, lang, key);
+        // Fallback: search all known namespaces if not found in inferred namespace
+        if (template == null) {
+            template = searchAllNamespaces(key, lang, namespace);
+        }
         if (template == null) {
             template = translatable.getFallback();
         }
@@ -174,6 +192,20 @@ public final class TranslationService {
         return safeFormat(template, formattedArgs);
     }
 
+    private @Nullable String searchAllNamespaces(String key, String lang, String skipNamespace) {
+        for (String ns : KNOWN_NAMESPACES) {
+            if (ns.equals(skipNamespace)) {
+                continue;
+            }
+            String result = translateKey(ns, lang, key);
+            if (result != null) {
+                AE2WebMod.LOGGER.debug("Found translation for key '{}' in fallback namespace '{}'", key, ns);
+                return result;
+            }
+        }
+        return null;
+    }
+
     private String formatArg(Object arg, String lang) {
         if (arg instanceof Component c) {
             return Optional.ofNullable(translateComponent(c, lang)).orElse(c.getString());
@@ -186,8 +218,17 @@ public final class TranslationService {
             return "minecraft";
         }
         String[] parts = key.split("\\.");
+        if (parts.length == 0) {
+            return "minecraft";
+        }
+        // Handle GTCEu-specific prefixes (e.g., "tagprefix.dust", "material.gtceu.xxx")
+        String firstPart = parts[0];
+        if (GTCEU_PREFIXES.contains(firstPart)) {
+            return "gtceu";
+        }
+        // Standard Minecraft format: type.namespace.path (e.g., "item.gtceu.dust")
         if (parts.length >= 3) {
-            return switch (parts[0]) {
+            return switch (firstPart) {
                 case "item", "block", "effect", "entity", "fluid", "enchantment" -> parts[1];
                 default -> "minecraft";
             };

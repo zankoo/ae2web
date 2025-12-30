@@ -40,13 +40,14 @@ public final class WebServer {
             }
 
             int port = AE2WebConfig.getHttpPort();
-            serverThread = new Thread(() -> runServer(port), "AE2Web-HTTP");
+            String bindAddress = AE2WebConfig.getBindAddress();
+            serverThread = new Thread(() -> runServer(bindAddress, port), "AE2Web-HTTP");
             serverThread.setDaemon(true);
             serverThread.start();
         }
     }
 
-    private void runServer(int port) {
+    private void runServer(String bindAddress, int port) {
         EventLoopGroup localBossGroup = new NioEventLoopGroup(1);
         EventLoopGroup localWorkerGroup = new NioEventLoopGroup();
 
@@ -63,13 +64,13 @@ public final class WebServer {
                     .option(ChannelOption.SO_BACKLOG, 128)
                     .childOption(ChannelOption.SO_KEEPALIVE, true);
 
-            Channel channel = bootstrap.bind(port).sync().channel();
+            Channel channel = bootstrap.bind(bindAddress, port).sync().channel();
             synchronized (lifecycleLock) {
                 serverChannel = channel;
                 running = true;
             }
 
-            AE2WebMod.LOGGER.info("AE2 Web Terminal HTTP server started on port {}", port);
+            AE2WebMod.LOGGER.info("AE2 Web Terminal HTTP server started on {}:{}", bindAddress, port);
             channel.closeFuture().sync();
         } catch (Exception e) {
             AE2WebMod.LOGGER.error("Failed to start HTTP server", e);

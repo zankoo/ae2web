@@ -26,11 +26,15 @@ public final class ResourceLocator {
         }
 
         if ("minecraft".equals(namespace)) {
-            return minecraftAssets.open("minecraft/" + relativePath);
+            String assetKey = "minecraft/" + relativePath;
+            Optional<InputStream> result = minecraftAssets.open(assetKey);
+            AE2WebMod.LOGGER.info("[ResourceLocator] openAsset minecraft asset: {} -> {}", assetKey, result.isPresent() ? "FOUND" : "NOT FOUND");
+            return result;
         }
 
         String resourcePath = "assets/" + namespace + "/" + relativePath;
         InputStream is = classLoader.getResourceAsStream(resourcePath);
+        AE2WebMod.LOGGER.info("[ResourceLocator] openAsset classpath resource: {} -> {}", resourcePath, is != null ? "FOUND" : "NOT FOUND");
         return Optional.ofNullable(is);
     }
 
