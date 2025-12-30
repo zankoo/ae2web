@@ -7,7 +7,7 @@ import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import com.kokoda.ae2web.config.AE2WebConfig;
 import com.kokoda.ae2web.web.WebServer;
-import com.kokoda.ae2web.web.assets.ItemIconService;
+import com.kokoda.ae2web.web.assets.GtceuMaterialColor;
 import com.kokoda.ae2web.web.assets.ResourceLocator;
 import com.kokoda.ae2web.web.assets.TranslationService;
 import com.kokoda.ae2web.web.dto.ItemStackDTO;
@@ -38,7 +38,6 @@ import net.minecraftforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.InputStream;
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -50,7 +49,6 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final ResourceLocator RESOURCE_LOCATOR = new ResourceLocator();
     private static final TranslationService TRANSLATIONS = new TranslationService(RESOURCE_LOCATOR);
-    private static final ItemIconService ITEM_ICONS = new ItemIconService(RESOURCE_LOCATOR);
     private static final int DEFAULT_PAGE_SIZE = 100;
     private static final int MAX_PAGE_SIZE = 500;
     private static final long MAX_CRAFT_AMOUNT = 1_000_000;
@@ -125,8 +123,6 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             handleTerminals(ctx, headers);
         } else if (path.equals("/api/items")) {
             handleItems(ctx, params, headers, lang);
-        } else if (path.equals("/api/item-icon")) {
-            handleItemIcon(ctx, params, headers);
         } else if (path.equals("/api/craft") && method == HttpMethod.POST) {
             String body = request.content().toString(CharsetUtil.UTF_8);
             handleCraft(ctx, body, headers, lang);
@@ -135,7 +131,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         } else if (path.startsWith("/api/prerender/")) {
             handlePrerenderRequest(ctx, request, path, method, params, headers);
         } else {
-            sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, 
+            sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND,
                     errorJson("API endpoint not found: " + path), headers);
         }
     }
@@ -268,95 +264,6 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             return GtceuMaterialColor.tryExtract(stack);
         } catch (Exception e) {
             return null;
-        }
-    }
-
-    private static final class GtceuMaterialColor {
-        private static final String CHEMICAL_HELPER_CLASS = "com.gregtechceu.gtceu.api.data.chemical.ChemicalHelper";
-
-        private static volatile boolean resolved;
-        private static volatile @Nullable Method getMaterialMethod;
-        private static volatile @Nullable Method getMaterialRgbMethod;
-
-        static @Nullable String tryExtract(ItemStack stack) {
-            if (stack == null || stack.isEmpty()) {
-                return null;
-            }
-
-            Method method = resolveGetMaterialMethod();
-            if (method == null) {
-                return null;
-            }
-
-            try {
-                Object material = method.invoke(null, stack);
-                if (material == null) {
-                    return null;
-                }
-
-                Method rgbMethod = resolveGetMaterialRgbMethod(material);
-                if (rgbMethod == null) {
-                    return null;
-                }
-                Object rgbValue = rgbMethod.invoke(material);
-                if (!(rgbValue instanceof Integer rgb)) {
-                    return null;
-                }
-
-                return String.format("%06X", rgb & 0xFFFFFF);
-            } catch (Throwable t) {
-                return null;
-            }
-        }
-
-        private static @Nullable Method resolveGetMaterialRgbMethod(Object material) {
-            Method cached = getMaterialRgbMethod;
-            if (cached != null && cached.getDeclaringClass().isInstance(material)) {
-                return cached;
-            }
-
-            synchronized (GtceuMaterialColor.class) {
-                cached = getMaterialRgbMethod;
-                if (cached != null && cached.getDeclaringClass().isInstance(material)) {
-                    return cached;
-                }
-
-                try {
-                    getMaterialRgbMethod = material.getClass().getMethod("getMaterialRGB");
-                } catch (Throwable t) {
-                    getMaterialRgbMethod = null;
-                }
-
-                return getMaterialRgbMethod;
-            }
-        }
-
-        private static @Nullable Method resolveGetMaterialMethod() {
-            if (resolved) {
-                return getMaterialMethod;
-            }
-
-            synchronized (GtceuMaterialColor.class) {
-                if (resolved) {
-                    return getMaterialMethod;
-                }
-                try {
-                    Class<?> helperClass = Class.forName(CHEMICAL_HELPER_CLASS);
-                    getMaterialMethod = helperClass.getMethod("getMaterial", ItemStack.class);
-                    try {
-                        getMaterialRgbMethod = getMaterialMethod.getReturnType().getMethod("getMaterialRGB");
-                    } catch (Throwable t) {
-                        getMaterialRgbMethod = null;
-                    }
-                } catch (ClassNotFoundException e) {
-                    getMaterialMethod = null;
-                } catch (Throwable t) {
-                    getMaterialMethod = null;
-                } finally {
-                    resolved = true;
-                }
-                return getMaterialMethod;
-            }
         }
     }
 
@@ -651,30 +558,6 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             case CPU_TOO_SMALL -> "Crafting CPU is too small";
             case MISSING_INGREDIENT -> "Missing ingredient";
         };
-    }
-
-    private void handleItemIcon(ChannelHandlerContext ctx, Map<String, List<String>> params, HttpHeaders headers) {
-        String id = getFirstParam(params, "id");
-        if (id == null || id.isBlank()) {
-            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST, errorJson("Missing id"), headers);
-            return;
-        }
-
-        ResourceLocation itemId = ResourceLocation.tryParse(id);
-        if (itemId == null) {
-            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST, errorJson("Invalid id"), headers);
-            return;
-        }
-
-        Optional<byte[]> png = ITEM_ICONS.getItemIconPng(itemId);
-        if (png.isEmpty()) {
-            sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, errorJson("Icon not found"), headers);
-            return;
-        }
-
-        headers.set(HttpHeaderNames.CONTENT_TYPE, "image/png");
-        headers.set(HttpHeaderNames.CACHE_CONTROL, "public, max-age=86400");
-        sendBinaryResponse(ctx, HttpResponseStatus.OK, png.get(), headers);
     }
 
     // ============ Prerender Endpoints ============
