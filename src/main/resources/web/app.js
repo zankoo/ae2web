@@ -8,9 +8,8 @@ let refreshInterval = null;
 let currentLang = null;
 
 const MOD_TARGET_MC_VERSION = '1.20.1';
-// minecraft-assets@1.15.0 does not provide a 1.20.1 dataset; 1.20.2 is the closest available.
-const CDN_ICON_DATA_VERSION = '1.20.2';
-const CDN_ICON_BASE_URL = `https://unpkg.com/minecraft-assets@1.15.0/minecraft-assets/data/${CDN_ICON_DATA_VERSION}/items/`;
+const CDN_ITEM_ICON_URL = 'https://assets.mcasset.cloud/1.20.1/assets/minecraft/textures/item/';
+const CDN_BLOCK_ICON_URL = 'https://assets.mcasset.cloud/1.20.1/assets/minecraft/textures/block/';
 const MC_LANG_CDN_URL = `https://assets.mcasset.cloud/${MOD_TARGET_MC_VERSION}/assets/minecraft/lang/en_us.json`;
 const PLACEHOLDER_ICON_URL = (() => {
     const svg = `
@@ -278,7 +277,10 @@ function getCdnIconUrl(itemId) {
     const safePath = path.replace(/[^a-zA-Z0-9_./-]/g, '');
     if (!safePath) return null;
 
-    return `${CDN_ICON_BASE_URL}${safePath}.png`;
+    return {
+        itemUrl: `${CDN_ITEM_ICON_URL}${safePath}.png`,
+        blockUrl: `${CDN_BLOCK_ICON_URL}${safePath}.png`
+    };
 }
 
 function setIconSrc(img, itemId, src, source) {
@@ -333,9 +335,9 @@ function initItemIcon(img, itemId) {
     img.addEventListener('load', () => {
         hideEmojiForIcon(img);
         const source = img.dataset.iconSource;
-        if (source === 'cdn' || source === 'placeholder') {
+        if (source === 'cdn-item' || source === 'cdn-block' || source === 'placeholder') {
             const src = img.currentSrc || img.src;
-            if (source === 'cdn') {
+            if (source === 'cdn-item' || source === 'cdn-block') {
                 itemIconCache.set(itemId, { src, source });
             } else {
                 itemIconCache.set(itemId, { src, source, expiresAt: Date.now() + PLACEHOLDER_ICON_TTL_MS });
@@ -367,9 +369,9 @@ function initItemIcon(img, itemId) {
         if (serverIconErrorUntil <= Date.now()) {
             serverIconErrorCache.delete(itemId);
         } else {
-            const cdnUrl = getCdnIconUrl(itemId);
-            if (cdnUrl) {
-                setIconSrc(img, itemId, cdnUrl, 'cdn');
+            const cdnUrls = getCdnIconUrl(itemId);
+            if (cdnUrls) {
+                setIconSrc(img, itemId, cdnUrls.itemUrl, 'cdn-item');
             } else if (showMaterialIcon(img)) {
                 // Material-based placeholder for modded items with no server icon
             } else {
@@ -384,7 +386,14 @@ function initItemIcon(img, itemId) {
 
 function handleItemIconError(img, itemId) {
     const source = img.dataset.iconSource;
-    if (source === 'cdn') {
+    if (source === 'cdn-item') {
+        const cdnUrls = getCdnIconUrl(itemId);
+        if (cdnUrls) {
+            setIconSrc(img, itemId, cdnUrls.blockUrl, 'cdn-block');
+            return;
+        }
+    }
+    if (source === 'cdn-block') {
         if (showMaterialIcon(img)) return;
         setIconSrc(img, itemId, PLACEHOLDER_ICON_URL, 'placeholder');
         return;
@@ -399,9 +408,9 @@ function handleItemIconError(img, itemId) {
     // Source === 'server': avoid extra fetch to detect HTTP status, treat errors as missing and retry later.
     serverIconErrorCache.set(itemId, Date.now() + SERVER_ICON_ERROR_TTL_MS);
 
-    const cdnUrl = getCdnIconUrl(itemId);
-    if (cdnUrl) {
-        setIconSrc(img, itemId, cdnUrl, 'cdn');
+    const cdnUrls = getCdnIconUrl(itemId);
+    if (cdnUrls) {
+        setIconSrc(img, itemId, cdnUrls.itemUrl, 'cdn-item');
         return;
     }
 

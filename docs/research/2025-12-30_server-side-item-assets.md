@@ -113,9 +113,127 @@ https://unpkg.com/minecraft-assets@1.15.0/minecraft-assets/data/1.20.2/items/iro
 https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.20/assets/minecraft/textures/item/diamond.png
 ```
 
+---
+
+## Similar Projects Analysis (2025-12-30 Update)
+
+### AppliedWebTerminal (ZhuRuoLing)
+**URL:** https://github.com/ZhuRuoLing/AppliedWebTerminal
+
+**Architecture:** Pre-baked client-side rendering
+
+**How it works:**
+1. User runs `/appwebterminal resources render` command in single-player world
+2. Command iterates ALL registered items via `ForgeRegistries.ITEMS.map { AEItemKey.of(it) }`
+3. Each item is rendered using Minecraft's `ItemRenderer` to a `FrameBuffer`
+4. Rendered image extracted via `NativeImage` and saved to `./aeKeyResources/{keyType}/{itemId}.png`
+5. For servers: user uploads the `aeKeyResources` folder to server
+6. Server serves images via HTTP endpoint `/aeResource/{keyType}/{key...}`
+
+**Key Components:**
+- `AEKeyRenderer.kt` - Manages framebuffer rendering
+- `AEKeyImageProvider` - Interface for different key types (items, fluids, chemicals)
+- `FrontendSupportRouting.kt` - Serves pre-rendered PNGs
+
+**Pros:**
+- Perfect pixel-accurate icons (uses actual game renderer)
+- Works with ALL mods (any item that renders in-game)
+- Handles dynamic textures, overlays, GTCEu materials correctly
+- No CDN dependencies
+
+**Cons:**
+- Requires manual step (run command, upload folder)
+- Large storage (thousands of PNG files)
+- Must re-render when mods change
+- Only works on client (command must run in single-player)
+
+**Code Example:**
+```kotlin
+// AEKeyRenderer.kt - Core rendering logic
+fun submitRenderTasks(basePath: Path, progressListener: RenderProgressListener) {
+    KeyImageProviderRegistry.values.toList().forEach { prov ->
+        val entries = prov.getAllEntries().toList()
+        renderTasks += {
+            entries.forEach { key ->
+                render(key, basePath / keyType / "$keyId.png")
+            }
+        }
+    }
+}
+
+// FrontendSupportRouting.kt - Serving endpoint
+get("/aeResource/{keyType}/{key...}") {
+    val filePath = Path("./aeKeyResources") / keyType / "$key.png"
+    call.respondFile(filePath.toFile())
+}
+```
+
+**Registry-based Provider System:**
+AppliedWebTerminal uses a registry for extensibility:
+```kotlin
+interface AEKeyImageProvider<T : AEKey> {
+    val keyType: AEKeyType
+    fun getAllEntries(): Iterable<T>
+    fun renderImage(aeKey: T, poseStack: PoseStack, bufferSource: BufferSource, ...)
+}
+```
+
+This allows mod compatibility via `@ImageProvider` annotation:
+- `AEItemKeyImageProvider` - Vanilla items
+- `AEFluidKeyImageProvider` - Fluids
+- `ChemicalKeyImageProvider` - Mekanism chemicals
+- `ManaKeyImageProvider` - Botania mana
+- `SourceKeyImageProvider` - Ars Nouveau source
+
+---
+
+### GTNH-OC-AE-Controller (SmileYik)
+**URL:** https://github.com/SmileYik/GTNH-OC-AE-Controller
+
+**Architecture:** In-game OpenComputers integration (not web-based)
+
+This project is for GTNH (GregTech New Horizons) modpack with OpenComputers, providing AE controller functionality within Minecraft itself. The architecture is fundamentally different - it uses OC screens and in-game rendering rather than a web browser.
+
+---
+
+## Comparison of Approaches
+
+| Approach | Icon Quality | Setup Complexity | Mod Compatibility | Offline Support |
+|----------|-------------|------------------|-------------------|-----------------|
+| CDN Fallback (Current) | Medium | Zero config | Vanilla only | No |
+| Pre-baked Rendering | Perfect | Manual step | All mods | Yes |
+| Server JAR Extraction | Low | Zero config | Some mods | Yes |
+
+---
+
+## Recommendations
+
+### Short-term (Current v1.3.x)
+Keep CDN fallback approach with improvements:
+- Use `assets.mcasset.cloud` for item AND block textures
+- Colored placeholder for GTCEu materials via `materialColor`
+
+### Medium-term (Future v1.4.x)
+Implement optional pre-rendering similar to AppliedWebTerminal:
+1. Add `/ae2web render` client command
+2. Save to `config/ae2web/icons/` folder
+3. Serve from this folder, fallback to CDN
+
+### Long-term
+If icon quality is critical:
+1. Port AppliedWebTerminal's rendering approach (Kotlin → Java)
+2. Iterate all registries (`ForgeRegistries.ITEMS`, fluids, etc.)
+3. Use `FrameBuffer` + `NativeImage` for rendering
+4. Provide upload mechanism for server deployments
+
+---
+
 ## References
 
 - PrismarineJS/minecraft-assets: https://github.com/PrismarineJS/minecraft-assets
 - mcasset.cloud: https://mcasset.cloud/
+- assets.mcasset.cloud: https://assets.mcasset.cloud/1.20.1/assets/minecraft/textures/
 - aternosorg/renderchest: https://github.com/aternosorg/renderchest
 - GTCEu Material API: https://cleanroommc.com/zh/groovy-script/mods/gtceu/material
+- AppliedWebTerminal: https://github.com/ZhuRuoLing/AppliedWebTerminal
+- GTNH-OC-AE-Controller: https://github.com/SmileYik/GTNH-OC-AE-Controller
