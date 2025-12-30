@@ -7,8 +7,11 @@ let selectedItem = null;
 let refreshInterval = null;
 let currentLang = null;
 
-const CDN_ICON_BASE_URL = 'https://unpkg.com/minecraft-assets@1.15.0/minecraft-assets/data/1.20.2/items/';
-const MC_LANG_CDN_URL = 'https://unpkg.com/minecraft-assets@1.15.0/minecraft-assets/data/1.20.2/language.json';
+const MOD_TARGET_MC_VERSION = '1.20.1';
+// minecraft-assets@1.15.0 does not provide a 1.20.1 dataset; 1.20.2 is the closest available.
+const CDN_ICON_DATA_VERSION = '1.20.2';
+const CDN_ICON_BASE_URL = `https://unpkg.com/minecraft-assets@1.15.0/minecraft-assets/data/${CDN_ICON_DATA_VERSION}/items/`;
+const MC_LANG_CDN_URL = `https://assets.mcasset.cloud/${MOD_TARGET_MC_VERSION}/assets/minecraft/lang/en_us.json`;
 const PLACEHOLDER_ICON_URL = (() => {
     const svg = `
         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
@@ -20,12 +23,15 @@ const PLACEHOLDER_ICON_URL = (() => {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 })();
 
+const PLACEHOLDER_ICON_TTL_MS = 60 * 1000;
+const SERVER_ICON_ERROR_TTL_MS = 60 * 1000;
+
 // Cache icon resolution results to avoid repeated 404/CDN fetches
-const itemIconCache = new Map(); // itemId -> resolved src (CDN or placeholder)
-const missingServerIcons = new Set(); // itemId known to 404 on /api/item-icon
+const itemIconCache = new Map(); // itemId -> { src, source, expiresAt? }
+const serverIconErrorCache = new Map(); // itemId -> expiresAt ms
 
 let minecraftTranslations = null;
-let minecraftTranslationsLoading = false;
+let minecraftTranslationsPromise = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -142,7 +148,7 @@ async function loadItems() {
     const grid = document.getElementById('inventory-grid');
 
     try {
-        loadMinecraftTranslations();
+        await loadMinecraftTranslations();
 
         const params = new URLSearchParams({
             page: currentPage,
@@ -165,25 +171,28 @@ async function loadItems() {
 
 async function loadMinecraftTranslations() {
     if (minecraftTranslations !== null) return minecraftTranslations;
-    if (minecraftTranslationsLoading) return minecraftTranslations;
+    if (minecraftTranslationsPromise) return minecraftTranslationsPromise;
 
-    minecraftTranslationsLoading = true;
-    try {
-        const response = await fetch(MC_LANG_CDN_URL);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch language.json (HTTP ${response.status})`);
+    minecraftTranslationsPromise = (async () => {
+        try {
+            const response = await fetch(MC_LANG_CDN_URL);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch translations (HTTP ${response.status})`);
+            }
+
+            const json = await response.json();
+            minecraftTranslations = json && typeof json === 'object' ? json : {};
+        } catch (error) {
+            console.warn('Failed to load Minecraft translations from CDN:', error);
+            minecraftTranslations = {};
         }
 
-        const json = await response.json();
-        minecraftTranslations = json && typeof json === 'object' ? json : {};
-    } catch (error) {
-        console.warn('Failed to load Minecraft translations from CDN:', error);
-        minecraftTranslations = {};
-    } finally {
-        minecraftTranslationsLoading = false;
-    }
+        return minecraftTranslations;
+    })().finally(() => {
+        minecraftTranslationsPromise = null;
+    });
 
-    return minecraftTranslations;
+    return minecraftTranslationsPromise;
 }
 
 function translateItemName(item) {
@@ -325,36 +334,55 @@ function initItemIcon(img, itemId) {
         hideEmojiForIcon(img);
         const source = img.dataset.iconSource;
         if (source === 'cdn' || source === 'placeholder') {
-            itemIconCache.set(itemId, img.src);
+            const src = img.currentSrc || img.src;
+            if (source === 'cdn') {
+                itemIconCache.set(itemId, { src, source });
+            } else {
+                itemIconCache.set(itemId, { src, source, expiresAt: Date.now() + PLACEHOLDER_ICON_TTL_MS });
+            }
         }
     });
     img.addEventListener('error', () => handleItemIconError(img, itemId));
 
-    const cached = itemIconCache.get(itemId);
+    const cached = (() => {
+        const entry = itemIconCache.get(itemId);
+        if (!entry) return null;
+        const expiresAt = entry.expiresAt;
+        if (typeof expiresAt === 'number' && expiresAt <= Date.now()) {
+            itemIconCache.delete(itemId);
+            return null;
+        }
+        return entry;
+    })();
     if (cached) {
-        if (cached === PLACEHOLDER_ICON_URL && showMaterialIcon(img)) {
+        if (cached.source === 'placeholder' && showMaterialIcon(img)) {
             return;
         }
-        setIconSrc(img, itemId, cached, cached === PLACEHOLDER_ICON_URL ? 'placeholder' : 'cdn');
+        setIconSrc(img, itemId, cached.src, cached.source);
         return;
     }
 
-    if (missingServerIcons.has(itemId)) {
-        const cdnUrl = getCdnIconUrl(itemId);
-        if (cdnUrl) {
-            setIconSrc(img, itemId, cdnUrl, 'cdn');
-        } else if (showMaterialIcon(img)) {
-            // Material-based placeholder for modded items with no server icon
+    const serverIconErrorUntil = serverIconErrorCache.get(itemId);
+    if (typeof serverIconErrorUntil === 'number') {
+        if (serverIconErrorUntil <= Date.now()) {
+            serverIconErrorCache.delete(itemId);
         } else {
-            setIconSrc(img, itemId, PLACEHOLDER_ICON_URL, 'placeholder');
+            const cdnUrl = getCdnIconUrl(itemId);
+            if (cdnUrl) {
+                setIconSrc(img, itemId, cdnUrl, 'cdn');
+            } else if (showMaterialIcon(img)) {
+                // Material-based placeholder for modded items with no server icon
+            } else {
+                setIconSrc(img, itemId, PLACEHOLDER_ICON_URL, 'placeholder');
+            }
+            return;
         }
-        return;
     }
 
     setIconSrc(img, itemId, getServerIconUrl(itemId), 'server');
 }
 
-async function handleItemIconError(img, itemId) {
+function handleItemIconError(img, itemId) {
     const source = img.dataset.iconSource;
     if (source === 'cdn') {
         if (showMaterialIcon(img)) return;
@@ -368,25 +396,12 @@ async function handleItemIconError(img, itemId) {
         return;
     }
 
-    // Source === 'server': only fall back to CDN when server returns 404.
-    let status = null;
-    try {
-        const res = await fetch(getServerIconUrl(itemId), { method: 'GET' });
-        status = res.status;
-    } catch {
-        // Network/server error: treat as non-404 and show placeholder.
-    }
+    // Source === 'server': avoid extra fetch to detect HTTP status, treat errors as missing and retry later.
+    serverIconErrorCache.set(itemId, Date.now() + SERVER_ICON_ERROR_TTL_MS);
 
-    if (status === 404) {
-        missingServerIcons.add(itemId);
-        const cdnUrl = getCdnIconUrl(itemId);
-        if (cdnUrl) {
-            setIconSrc(img, itemId, cdnUrl, 'cdn');
-        } else if (showMaterialIcon(img)) {
-            return;
-        } else {
-            setIconSrc(img, itemId, PLACEHOLDER_ICON_URL, 'placeholder');
-        }
+    const cdnUrl = getCdnIconUrl(itemId);
+    if (cdnUrl) {
+        setIconSrc(img, itemId, cdnUrl, 'cdn');
         return;
     }
 

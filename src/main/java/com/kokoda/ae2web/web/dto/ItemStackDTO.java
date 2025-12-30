@@ -10,15 +10,16 @@ public class ItemStackDTO {
     private final long amount;
     private final String namespace;
 
-    public String materialColor;
+    private final String materialColor;
 
-    public ItemStackDTO(AEItemKey key, long amount, String name, String translationKey) {
+    public ItemStackDTO(AEItemKey key, long amount, String name, String translationKey, String materialColor) {
         ResourceLocation itemId = key.getId();
         this.id = itemId.toString();
         this.namespace = itemId.getNamespace();
         this.name = name;
         this.translationKey = translationKey;
         this.amount = amount;
+        this.materialColor = materialColor;
     }
 
     public String getId() {
@@ -39,5 +40,9 @@ public class ItemStackDTO {
 
     public String getNamespace() {
         return namespace;
+    }
+
+    public String getMaterialColor() {
+        return materialColor;
     }
 }

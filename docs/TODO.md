@@ -2,10 +2,19 @@
 
 ## Pending
 
+- [ ] TASTE-13: Simplify translation key detection in app.js translateItemName() - current heuristic (dots + lowercase) is fragile, consider backend flag
+
 ## In Progress
 
 ## Completed
 
+- [x] FIX-1: Update CDN URLs to match mod target (1.20.1) - lang JSON uses 1.20.1; item icon CDN uses 1.20.2 as closest available dataset
+- [x] PERF-2: Avoid double request for missing icons - app.js uses image onerror + server error TTL, no extra fetch to detect 404
+- [x] BUG-2: Fix translation loading race condition - loadMinecraftTranslations() returns null while loading, store promise instead
+- [x] BUG-1: Fix icon cache "stuck" on placeholder after transient failures - add cache expiry or retry mechanism in app.js
+- [x] PERF-1: Defer materialColor computation until after pagination - currently computed for all items before pagination in ApiHandler.filterItems()
+- [x] TASTE-12: Cache getMaterialRGB reflection method in GtceuMaterialColor - currently only getMaterial is cached, rgbMethod is looked up on every call
+- [x] TASTE-11: Fix DTO post-mutation in ApiHandler.filterItems() - pass materialColor to ItemStackDTO constructor instead of setting field after construction
 - [x] MED-2: Remove debug logging from TranslationService and ItemIconService - change info level back to debug after fixes confirmed working
 - [x] MED-1: Add frontend CDN fallback for Minecraft item name translations - fetch language.json in app.js and translate translation keys client-side
 - [x] HIGH-4: Implement GTCEu materialColor icon fallback in web UI - use colored placeholder when server icon missing

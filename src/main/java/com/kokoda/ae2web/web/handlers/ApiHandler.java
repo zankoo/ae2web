@@ -202,9 +202,18 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 return;
             }
 
-            List<ItemStackDTO> items = filterItems(terminal.getNetworkInventory(), search, lang);
-            List<ItemStackDTO> sortedItems = sortByAmount(items);
-            List<ItemStackDTO> pageItems = paginate(sortedItems, page, pageSize);
+            List<FilteredItem> filteredItems = filterItems(terminal.getNetworkInventory(), search, lang);
+            List<FilteredItem> sortedItems = sortByAmount(filteredItems);
+            List<FilteredItem> pageEntries = paginate(sortedItems, page, pageSize);
+            List<ItemStackDTO> pageItems = pageEntries.stream()
+                    .map(entry -> new ItemStackDTO(
+                            entry.key(),
+                            entry.amount(),
+                            entry.name(),
+                            entry.translationKey(),
+                            tryResolveGtceuMaterialColor(entry.key())
+                    ))
+                    .toList();
 
             int total = sortedItems.size();
             int totalPages = Math.max(1, (total + pageSize - 1) / pageSize);
@@ -228,7 +237,9 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         return terminal.isConnectedToGrid() ? terminal : null;
     }
 
-    private List<ItemStackDTO> filterItems(Map<AEKey, Long> inventory, String searchLower, String lang) {
+    private record FilteredItem(AEItemKey key, long amount, String name, String translationKey) {}
+
+    private List<FilteredItem> filterItems(Map<AEKey, Long> inventory, String searchLower, String lang) {
         return inventory.entrySet().stream()
                 .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
                 .filter(entry -> entry.getKey() instanceof AEItemKey)
@@ -238,9 +249,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                     AEItemKey key = entry.getKey();
                     String translationKey = key.getItem().getDescriptionId();
                     String name = TRANSLATIONS.translateItemDisplayName(key, lang);
-                    ItemStackDTO dto = new ItemStackDTO(key, entry.getValue(), name, translationKey);
-                    dto.materialColor = tryResolveGtceuMaterialColor(key);
-                    return dto;
+                    return new FilteredItem(key, entry.getValue(), name, translationKey);
                 })
                 .toList();
     }
@@ -264,6 +273,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
         private static volatile boolean resolved;
         private static volatile @Nullable Method getMaterialMethod;
+        private static volatile @Nullable Method getMaterialRgbMethod;
 
         static @Nullable String tryExtract(ItemStack stack) {
             if (stack == null || stack.isEmpty()) {
@@ -281,7 +291,10 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                     return null;
                 }
 
-                Method rgbMethod = material.getClass().getMethod("getMaterialRGB");
+                Method rgbMethod = resolveGetMaterialRgbMethod(material);
+                if (rgbMethod == null) {
+                    return null;
+                }
                 Object rgbValue = rgbMethod.invoke(material);
                 if (!(rgbValue instanceof Integer rgb)) {
                     return null;
@@ -290,6 +303,28 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 return String.format("%06X", rgb & 0xFFFFFF);
             } catch (Throwable t) {
                 return null;
+            }
+        }
+
+        private static @Nullable Method resolveGetMaterialRgbMethod(Object material) {
+            Method cached = getMaterialRgbMethod;
+            if (cached != null && cached.getDeclaringClass().isInstance(material)) {
+                return cached;
+            }
+
+            synchronized (GtceuMaterialColor.class) {
+                cached = getMaterialRgbMethod;
+                if (cached != null && cached.getDeclaringClass().isInstance(material)) {
+                    return cached;
+                }
+
+                try {
+                    getMaterialRgbMethod = material.getClass().getMethod("getMaterialRGB");
+                } catch (Throwable t) {
+                    getMaterialRgbMethod = null;
+                }
+
+                return getMaterialRgbMethod;
             }
         }
 
@@ -305,6 +340,11 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 try {
                     Class<?> helperClass = Class.forName(CHEMICAL_HELPER_CLASS);
                     getMaterialMethod = helperClass.getMethod("getMaterial", ItemStack.class);
+                    try {
+                        getMaterialRgbMethod = getMaterialMethod.getReturnType().getMethod("getMaterialRGB");
+                    } catch (Throwable t) {
+                        getMaterialRgbMethod = null;
+                    }
                 } catch (ClassNotFoundException e) {
                     getMaterialMethod = null;
                 } catch (Throwable t) {
@@ -326,9 +366,9 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         return name.contains(searchLower) || id.contains(searchLower);
     }
 
-    private List<ItemStackDTO> sortByAmount(List<ItemStackDTO> items) {
+    private List<FilteredItem> sortByAmount(List<FilteredItem> items) {
         return items.stream()
-                .sorted(Comparator.comparingLong(ItemStackDTO::getAmount).reversed())
+                .sorted(Comparator.comparingLong(FilteredItem::amount).reversed())
                 .toList();
     }
 
