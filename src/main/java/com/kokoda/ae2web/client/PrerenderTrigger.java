@@ -25,9 +25,9 @@ public class PrerenderTrigger {
     private static final int CHECK_DELAY_TICKS = 100; // 5 seconds after join
     private static final int MAX_AUTO_RENDER = 500;
 
-    private static boolean pendingCheck = false;
-    private static int delayCounter = 0;
-    private static String serverUrl = null;
+    private static volatile boolean pendingCheck = false;
+    private static volatile int delayCounter = 0;
+    private static volatile String serverUrl = null;
 
     @SubscribeEvent
     public static void onPlayerJoin(ClientPlayerNetworkEvent.LoggingIn event) {
@@ -86,15 +86,23 @@ public class PrerenderTrigger {
     }
 
     private static void triggerMissingIconCheck() {
-        if (serverUrl == null) return;
+        // Capture serverUrl at the start to avoid race conditions in async callbacks
+        String currentServerUrl = serverUrl;
+        if (currentServerUrl == null) return;
 
-        AE2WebMod.LOGGER.info("Checking for missing icons at {}", serverUrl);
+        AE2WebMod.LOGGER.info("Checking for missing icons at {}", currentServerUrl);
 
         int maxItems = Math.min(MAX_AUTO_RENDER, AE2WebConfig.getPrerenderAutoMaxItems());
 
         PrerenderHttpClient client = PrerenderHttpClient.getInstance();
-        client.fetchMissingIcons(serverUrl, maxItems)
+        client.fetchMissingIcons(currentServerUrl, maxItems)
                 .thenAccept(missingIds -> {
+                    // Check if still connected (serverUrl not cleared)
+                    if (serverUrl == null) {
+                        AE2WebMod.LOGGER.debug("Player logged out, cancelling prerender");
+                        return;
+                    }
+
                     if (missingIds.isEmpty()) {
                         AE2WebMod.LOGGER.info("No missing icons found");
                         return;
@@ -103,15 +111,21 @@ public class PrerenderTrigger {
                     AE2WebMod.LOGGER.info("Found {} missing icons, claiming for rendering", missingIds.size());
 
                     // Claim items to avoid concurrent rendering
-                    client.claimItems(serverUrl, missingIds)
+                    client.claimItems(currentServerUrl, missingIds)
                             .thenAccept(claimedIds -> {
+                                // Check if still connected
+                                if (serverUrl == null) {
+                                    AE2WebMod.LOGGER.debug("Player logged out, cancelling prerender");
+                                    return;
+                                }
+
                                 if (claimedIds.isEmpty()) {
                                     AE2WebMod.LOGGER.info("No items claimed (may be rendered by another client)");
                                     return;
                                 }
 
                                 notifyPlayer(claimedIds.size());
-                                startAutoRender(claimedIds);
+                                startAutoRender(claimedIds, currentServerUrl);
                             });
                 })
                 .exceptionally(e -> {
@@ -120,7 +134,7 @@ public class PrerenderTrigger {
                 });
     }
 
-    private static void startAutoRender(List<String> itemIds) {
+    private static void startAutoRender(List<String> itemIds, String targetServerUrl) {
         AE2WebMod.LOGGER.info("Starting auto-render for {} items", itemIds.size());
 
         List<ResourceLocation> resourceLocations = itemIds.stream()
@@ -136,7 +150,7 @@ public class PrerenderTrigger {
             }
         });
 
-        scheduler.submitBatch(resourceLocations, serverUrl);
+        scheduler.submitBatch(resourceLocations, targetServerUrl);
     }
 
     private static void notifyPlayer(int count) {

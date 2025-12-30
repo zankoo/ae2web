@@ -153,16 +153,14 @@ public class ItemIconRenderer {
             RenderSystem.restoreProjectionMatrix();
             frameBuffer.unbindWrite();
 
-            // Read pixels
-            NativeImage nativeImage = new NativeImage(width, height, false);
-            RenderSystem.bindTexture(frameBuffer.getColorTextureId());
-            nativeImage.downloadTexture(0, false);
+            // Read pixels using try-with-resources
+            try (NativeImage nativeImage = new NativeImage(width, height, false)) {
+                RenderSystem.bindTexture(frameBuffer.getColorTextureId());
+                nativeImage.downloadTexture(0, false);
 
-            // Process pixels: flip Y and convert to PNG
-            byte[] pngBytes = convertToPng(nativeImage);
-
-            nativeImage.close();
-            return pngBytes;
+                // Process pixels: flip Y and convert to PNG
+                return convertToPng(nativeImage);
+            }
 
         } catch (Exception e) {
             AE2WebMod.LOGGER.error("Failed to render item: {}", stack.getItem().getDescriptionId(), e);

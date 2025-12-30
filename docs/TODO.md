@@ -8,6 +8,13 @@
 
 ## Completed
 
+- [x] SEC-1: Fix thread safety in PrerenderStorageService - use synchronized blocks instead of read/write locks with LRU LinkedHashMap
+- [x] SEC-2: Fix path traversal vulnerability in PrerenderStorageService - reject ".." and add path normalization check
+- [x] SEC-3: Fix HTTP connection leaks in PrerenderHttpClient - use try-finally with disconnect()
+- [x] SEC-4: Fix NativeImage resource leak in ItemIconRenderer - use try-with-resources
+- [x] SEC-5: Fix thread scheduling in RenderScheduler - remove unnecessary mc.execute() since tick runs on render thread
+- [x] SEC-6: Fix race condition with serverUrl in PrerenderTrigger - capture serverUrl at start of async ops, add volatile
+- [x] SEC-7: Move prerender disk I/O off Netty thread - wrap upload/image handlers with runOnServerThread()
 - [x] FEAT-1: Implement client-side prerender architecture - auto-render item icons on player join, upload to server
 - [x] FIX-1: Update CDN URLs to match mod target (1.20.1) - lang JSON uses 1.20.1; item icon CDN uses 1.20.2 as closest available dataset
 - [x] PERF-2: Avoid double request for missing icons - app.js uses image onerror + server error TTL, no extra fetch to detect 404

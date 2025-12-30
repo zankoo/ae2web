@@ -778,18 +778,21 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             return;
         }
 
-        PrerenderStorageService storage = PrerenderStorageService.getInstance();
-        storage.initialize();
+        // Move disk I/O off Netty thread
+        runOnServerThread(ctx, headers, () -> {
+            PrerenderStorageService storage = PrerenderStorageService.getInstance();
+            storage.initialize();
 
-        if (storage.saveIcon(itemId, pngData)) {
-            JsonObject response = new JsonObject();
-            response.addProperty("status", "saved");
-            response.addProperty("itemId", itemId);
-            sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(response), headers);
-        } else {
-            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
-                    errorJson("Failed to save icon"), headers);
-        }
+            if (storage.saveIcon(itemId, pngData)) {
+                JsonObject response = new JsonObject();
+                response.addProperty("status", "saved");
+                response.addProperty("itemId", itemId);
+                sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(response), headers);
+            } else {
+                sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                        errorJson("Failed to save icon"), headers);
+            }
+        });
     }
 
     private void handlePrerenderImage(ChannelHandlerContext ctx,
@@ -800,18 +803,21 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             return;
         }
 
-        PrerenderStorageService storage = PrerenderStorageService.getInstance();
-        storage.initialize();
+        // Move disk I/O off Netty thread
+        runOnServerThread(ctx, headers, () -> {
+            PrerenderStorageService storage = PrerenderStorageService.getInstance();
+            storage.initialize();
 
-        byte[] png = storage.getIcon(id);
-        if (png == null) {
-            sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, errorJson("Icon not found"), headers);
-            return;
-        }
+            byte[] png = storage.getIcon(id);
+            if (png == null) {
+                sendJsonResponse(ctx, HttpResponseStatus.NOT_FOUND, errorJson("Icon not found"), headers);
+                return;
+            }
 
-        headers.set(HttpHeaderNames.CONTENT_TYPE, "image/png");
-        headers.set(HttpHeaderNames.CACHE_CONTROL, "public, max-age=86400");
-        sendBinaryResponse(ctx, HttpResponseStatus.OK, png, headers);
+            headers.set(HttpHeaderNames.CONTENT_TYPE, "image/png");
+            headers.set(HttpHeaderNames.CACHE_CONTROL, "public, max-age=86400");
+            sendBinaryResponse(ctx, HttpResponseStatus.OK, png, headers);
+        });
     }
 
     private void handlePrerenderClaim(ChannelHandlerContext ctx, String body, HttpHeaders headers) {

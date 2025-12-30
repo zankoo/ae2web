@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -21,27 +20,22 @@ import java.util.stream.Stream;
 public class PrerenderStorageService {
     private static final PrerenderStorageService INSTANCE = new PrerenderStorageService();
 
-    private static final int DEFAULT_CACHE_SIZE = 1024;
     private static final long LOCK_TTL_MS = 60000; // 1 minute
 
     private final Path storageRoot;
     private final Map<String, byte[]> iconCache;
+    private final Object cacheLock = new Object();
     private final Set<String> existenceCache;
     private final Map<String, Long> renderingLocks;
-    private final ReentrantReadWriteLock cacheLock;
     private volatile boolean initialized = false;
 
     private PrerenderStorageService() {
         this.storageRoot = Paths.get("config", "ae2web", "prerender");
-        this.iconCache = new LinkedHashMap<>(DEFAULT_CACHE_SIZE, 0.75f, true) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<String, byte[]> eldest) {
-                return size() > AE2WebConfig.getPrerenderCacheSize();
-            }
-        };
+        // Use LinkedHashMap with accessOrder=true for LRU eviction
+        // All access must be synchronized via cacheLock
+        this.iconCache = new LinkedHashMap<>(128, 0.75f, true);
         this.existenceCache = ConcurrentHashMap.newKeySet();
         this.renderingLocks = new ConcurrentHashMap<>();
-        this.cacheLock = new ReentrantReadWriteLock();
     }
 
     public static PrerenderStorageService getInstance() {
@@ -120,15 +114,12 @@ public class PrerenderStorageService {
      * Returns null if not found.
      */
     public @Nullable byte[] getIcon(String itemId) {
-        // Check memory cache first
-        cacheLock.readLock().lock();
-        try {
+        // Check memory cache first (synchronized for thread safety with LRU)
+        synchronized (cacheLock) {
             byte[] cached = iconCache.get(itemId);
             if (cached != null) {
                 return cached;
             }
-        } finally {
-            cacheLock.readLock().unlock();
         }
 
         // Check existence cache
@@ -146,18 +137,29 @@ public class PrerenderStorageService {
         try {
             byte[] data = Files.readAllBytes(filePath);
 
-            // Cache the loaded data
-            cacheLock.writeLock().lock();
-            try {
+            // Cache the loaded data with LRU eviction
+            synchronized (cacheLock) {
                 iconCache.put(itemId, data);
-            } finally {
-                cacheLock.writeLock().unlock();
+                evictIfNeeded();
             }
 
             return data;
         } catch (IOException e) {
             AE2WebMod.LOGGER.warn("Failed to read prerendered icon: {}", itemId, e);
             return null;
+        }
+    }
+
+    private void evictIfNeeded() {
+        int maxSize = AE2WebConfig.getPrerenderCacheSize();
+        while (iconCache.size() > maxSize) {
+            Iterator<String> it = iconCache.keySet().iterator();
+            if (it.hasNext()) {
+                it.next();
+                it.remove();
+            } else {
+                break;
+            }
         }
     }
 
@@ -196,11 +198,9 @@ public class PrerenderStorageService {
 
             // Update caches
             existenceCache.add(itemId);
-            cacheLock.writeLock().lock();
-            try {
+            synchronized (cacheLock) {
                 iconCache.put(itemId, pngData);
-            } finally {
-                cacheLock.writeLock().unlock();
+                evictIfNeeded();
             }
 
             // Release any lock
@@ -230,18 +230,50 @@ public class PrerenderStorageService {
         namespace = sanitizePath(namespace);
         path = sanitizePath(path);
 
-        if (namespace.isEmpty() || path.isEmpty()) {
+        if (namespace == null || path == null) {
             return null;
         }
 
-        return storageRoot.resolve(namespace).resolve(path + ".png");
+        Path filePath = storageRoot.resolve(namespace).resolve(path + ".png");
+
+        // Security check: ensure resolved path is under storageRoot
+        try {
+            Path normalizedPath = filePath.toAbsolutePath().normalize();
+            Path normalizedRoot = storageRoot.toAbsolutePath().normalize();
+            if (!normalizedPath.startsWith(normalizedRoot)) {
+                AE2WebMod.LOGGER.warn("Path traversal attempt detected: {}", itemId);
+                return null;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+
+        return filePath;
     }
 
     /**
      * Sanitize a path component to prevent directory traversal.
+     * Returns null if the component is invalid.
      */
-    private String sanitizePath(String component) {
-        return component.replaceAll("[^a-zA-Z0-9_.-]", "_");
+    private @Nullable String sanitizePath(String component) {
+        if (component == null || component.isEmpty()) {
+            return null;
+        }
+
+        // Reject path traversal attempts
+        if (component.contains("..") || component.contains("/") || component.contains("\\")) {
+            return null;
+        }
+
+        // Only allow alphanumeric, underscore, hyphen, and dot (but not starting with dot)
+        String sanitized = component.replaceAll("[^a-zA-Z0-9_.-]", "_");
+
+        // Reject if starts with dot (hidden files)
+        if (sanitized.startsWith(".")) {
+            return null;
+        }
+
+        return sanitized.isEmpty() ? null : sanitized;
     }
 
     /**
@@ -273,12 +305,16 @@ public class PrerenderStorageService {
     public Map<String, Integer> getStats() {
         int totalItems = ForgeRegistries.ITEMS.getKeys().size();
         int renderedCount = existenceCache.size();
+        int cacheSize;
+        synchronized (cacheLock) {
+            cacheSize = iconCache.size();
+        }
 
         Map<String, Integer> stats = new LinkedHashMap<>();
         stats.put("totalItems", totalItems);
         stats.put("renderedCount", renderedCount);
         stats.put("missingCount", totalItems - renderedCount);
-        stats.put("cacheSize", iconCache.size());
+        stats.put("cacheSize", cacheSize);
         stats.put("activeLocks", renderingLocks.size());
 
         return stats;
@@ -319,11 +355,8 @@ public class PrerenderStorageService {
      * Clear all pre-rendered icons.
      */
     public void clearAll() {
-        cacheLock.writeLock().lock();
-        try {
+        synchronized (cacheLock) {
             iconCache.clear();
-        } finally {
-            cacheLock.writeLock().unlock();
         }
 
         existenceCache.clear();

@@ -85,6 +85,7 @@ public class RenderScheduler {
 
     /**
      * Called each frame from client tick event.
+     * Must be called on the main client thread (which is also the render thread).
      */
     public void tick() {
         if (!isActive.get() || isPaused.get()) return;
@@ -92,11 +93,13 @@ public class RenderScheduler {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null) return;
 
-        // Ensure we're on render thread
-        if (!RenderSystem.isOnRenderThread()) {
-            mc.execute(this::doRender);
-        } else {
+        // ClientTickEvent runs on the main client thread which is the render thread
+        // Directly call doRender since we're already on the correct thread
+        if (RenderSystem.isOnRenderThread()) {
             doRender();
+        } else {
+            // This shouldn't happen in normal operation, but log if it does
+            AE2WebMod.LOGGER.warn("RenderScheduler.tick() called from wrong thread");
         }
     }
 

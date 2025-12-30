@@ -55,9 +55,10 @@ public class PrerenderHttpClient {
      */
     public CompletableFuture<List<String>> fetchMissingIcons(String serverUrl, int limit) {
         return CompletableFuture.supplyAsync(() -> {
+            HttpURLConnection conn = null;
             try {
                 String url = serverUrl + "/api/prerender/missing?limit=" + limit;
-                HttpURLConnection conn = createConnection(url, "GET");
+                conn = createConnection(url, "GET");
                 conn.connect();
 
                 int responseCode = conn.getResponseCode();
@@ -66,7 +67,10 @@ public class PrerenderHttpClient {
                     return Collections.emptyList();
                 }
 
-                String response = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                String response;
+                try (var is = conn.getInputStream()) {
+                    response = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                }
                 JsonObject json = GSON.fromJson(response, JsonObject.class);
 
                 List<String> missing = new ArrayList<>();
@@ -79,6 +83,10 @@ public class PrerenderHttpClient {
             } catch (Exception e) {
                 AE2WebMod.LOGGER.warn("Failed to fetch missing icons", e);
                 return Collections.emptyList();
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }, executor);
     }
@@ -88,9 +96,10 @@ public class PrerenderHttpClient {
      */
     public CompletableFuture<List<String>> claimItems(String serverUrl, List<String> itemIds) {
         return CompletableFuture.supplyAsync(() -> {
+            HttpURLConnection conn = null;
             try {
                 String url = serverUrl + "/api/prerender/claim";
-                HttpURLConnection conn = createConnection(url, "POST");
+                conn = createConnection(url, "POST");
                 conn.setDoOutput(true);
                 conn.setRequestProperty("Content-Type", "application/json");
 
@@ -110,7 +119,10 @@ public class PrerenderHttpClient {
                     return Collections.emptyList();
                 }
 
-                String response = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                String response;
+                try (var is = conn.getInputStream()) {
+                    response = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                }
                 JsonObject json = GSON.fromJson(response, JsonObject.class);
 
                 List<String> claimed = new ArrayList<>();
@@ -123,6 +135,10 @@ public class PrerenderHttpClient {
             } catch (Exception e) {
                 AE2WebMod.LOGGER.warn("Failed to claim items", e);
                 return Collections.emptyList();
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }, executor);
     }
@@ -132,9 +148,10 @@ public class PrerenderHttpClient {
      */
     public CompletableFuture<Boolean> uploadIcon(String serverUrl, String itemId, byte[] pngData) {
         return CompletableFuture.supplyAsync(() -> {
+            HttpURLConnection conn = null;
             try {
                 String url = serverUrl + "/api/prerender/upload";
-                HttpURLConnection conn = createConnection(url, "POST");
+                conn = createConnection(url, "POST");
                 conn.setDoOutput(true);
                 conn.setRequestProperty("Content-Type", "application/json");
 
@@ -157,6 +174,10 @@ public class PrerenderHttpClient {
             } catch (Exception e) {
                 AE2WebMod.LOGGER.warn("Failed to upload icon: {}", itemId, e);
                 return false;
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }, executor);
     }
@@ -166,9 +187,10 @@ public class PrerenderHttpClient {
      */
     public CompletableFuture<Map<String, Integer>> getStats(String serverUrl) {
         return CompletableFuture.supplyAsync(() -> {
+            HttpURLConnection conn = null;
             try {
                 String url = serverUrl + "/api/prerender/stats";
-                HttpURLConnection conn = createConnection(url, "GET");
+                conn = createConnection(url, "GET");
                 conn.connect();
 
                 int responseCode = conn.getResponseCode();
@@ -176,7 +198,10 @@ public class PrerenderHttpClient {
                     return Collections.emptyMap();
                 }
 
-                String response = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                String response;
+                try (var is = conn.getInputStream()) {
+                    response = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                }
                 JsonObject json = GSON.fromJson(response, JsonObject.class);
 
                 Map<String, Integer> stats = new HashMap<>();
@@ -190,6 +215,10 @@ public class PrerenderHttpClient {
             } catch (Exception e) {
                 AE2WebMod.LOGGER.warn("Failed to get stats", e);
                 return Collections.emptyMap();
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }, executor);
     }
@@ -199,14 +228,19 @@ public class PrerenderHttpClient {
      */
     public CompletableFuture<Boolean> isServerReachable(String serverUrl) {
         return CompletableFuture.supplyAsync(() -> {
+            HttpURLConnection conn = null;
             try {
                 String url = serverUrl + "/api/status";
-                HttpURLConnection conn = createConnection(url, "GET");
+                conn = createConnection(url, "GET");
                 conn.setConnectTimeout(5000);
                 conn.connect();
                 return conn.getResponseCode() == 200;
             } catch (Exception e) {
                 return false;
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }, executor);
     }
