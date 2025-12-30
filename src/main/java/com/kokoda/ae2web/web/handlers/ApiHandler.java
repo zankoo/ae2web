@@ -31,11 +31,13 @@ import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -236,9 +238,83 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                     AEItemKey key = entry.getKey();
                     String translationKey = key.getItem().getDescriptionId();
                     String name = TRANSLATIONS.translateItemDisplayName(key, lang);
-                    return new ItemStackDTO(key, entry.getValue(), name, translationKey);
+                    ItemStackDTO dto = new ItemStackDTO(key, entry.getValue(), name, translationKey);
+                    dto.materialColor = tryResolveGtceuMaterialColor(key);
+                    return dto;
                 })
                 .toList();
+    }
+
+    private static @Nullable String tryResolveGtceuMaterialColor(AEItemKey itemKey) {
+        ResourceLocation id = itemKey.getId();
+        if (!"gtceu".equals(id.getNamespace())) {
+            return null;
+        }
+
+        try {
+            ItemStack stack = itemKey.toStack();
+            return GtceuMaterialColor.tryExtract(stack);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static final class GtceuMaterialColor {
+        private static final String CHEMICAL_HELPER_CLASS = "com.gregtechceu.gtceu.api.data.chemical.ChemicalHelper";
+
+        private static volatile boolean resolved;
+        private static volatile @Nullable Method getMaterialMethod;
+
+        static @Nullable String tryExtract(ItemStack stack) {
+            if (stack == null || stack.isEmpty()) {
+                return null;
+            }
+
+            Method method = resolveGetMaterialMethod();
+            if (method == null) {
+                return null;
+            }
+
+            try {
+                Object material = method.invoke(null, stack);
+                if (material == null) {
+                    return null;
+                }
+
+                Method rgbMethod = material.getClass().getMethod("getMaterialRGB");
+                Object rgbValue = rgbMethod.invoke(material);
+                if (!(rgbValue instanceof Integer rgb)) {
+                    return null;
+                }
+
+                return String.format("%06X", rgb & 0xFFFFFF);
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+
+        private static @Nullable Method resolveGetMaterialMethod() {
+            if (resolved) {
+                return getMaterialMethod;
+            }
+
+            synchronized (GtceuMaterialColor.class) {
+                if (resolved) {
+                    return getMaterialMethod;
+                }
+                try {
+                    Class<?> helperClass = Class.forName(CHEMICAL_HELPER_CLASS);
+                    getMaterialMethod = helperClass.getMethod("getMaterial", ItemStack.class);
+                } catch (ClassNotFoundException e) {
+                    getMaterialMethod = null;
+                } catch (Throwable t) {
+                    getMaterialMethod = null;
+                } finally {
+                    resolved = true;
+                }
+                return getMaterialMethod;
+            }
+        }
     }
 
     private boolean matchesSearch(AEItemKey itemKey, String searchLower, String lang) {

@@ -6,6 +6,12 @@
 
 ## Completed
 
+- [x] MED-2: Remove debug logging from TranslationService and ItemIconService - change info level back to debug after fixes confirmed working
+- [x] MED-1: Add frontend CDN fallback for Minecraft item name translations - fetch language.json in app.js and translate translation keys client-side
+- [x] HIGH-4: Implement GTCEu materialColor icon fallback in web UI - use colored placeholder when server icon missing
+- [x] HIGH-3: Add GTCEu base texture templates to web resources - copy dust.png, ingot.png, gem.png etc. from GTCEu JAR to src/main/resources/web/textures/gtceu/ (skipped: using colored placeholder instead)
+- [x] HIGH-2: Add materialColor field to ItemStackDTO - extract RGB color for GTCEu materials using item NBT or registry lookup, return as hex string (e.g., "FFE650")
+- [x] HIGH-1: Add frontend CDN fallback for Minecraft item icons - when /api/icon returns 404, fetch from unpkg CDN (https://unpkg.com/minecraft-assets@1.15.0/minecraft-assets/data/1.20.2/items/{path}.png) in app.js
 - [x] TASTE-10: Extract translateTranslatable() and formatArg() helper methods from TranslationService.translateComponent() to reduce nesting
 - [x] TASTE-9: Add ResourceLocator.assetExists() method and refactor ItemIconService.tryTexture() to use it instead of opening stream just to check existence
 - [x] TASTE-8: Delete redundant minecraft namespace branch in TranslationService.openLangStream() - both branches do the same thing

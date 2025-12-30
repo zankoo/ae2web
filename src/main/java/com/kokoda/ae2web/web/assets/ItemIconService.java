@@ -51,27 +51,27 @@ public final class ItemIconService {
     private Optional<byte[]> resolveItemIcon(ResourceLocation itemId) {
         String namespace = itemId.getNamespace();
         String path = itemId.getPath();
-        AE2WebMod.LOGGER.info("[ItemIconService] Resolving icon for item: {}", itemId);
+        AE2WebMod.LOGGER.debug("[ItemIconService] Resolving icon for item: {}", itemId);
 
         ResourceLocation modelId = new ResourceLocation(namespace, "item/" + path);
         Optional<ResourceLocation> textureId = resolveTextureFromModel(modelId);
         if (textureId.isPresent()) {
-            AE2WebMod.LOGGER.info("[ItemIconService] Found texture from model {}: {}", modelId, textureId.get());
+            AE2WebMod.LOGGER.debug("[ItemIconService] Found texture from model {}: {}", modelId, textureId.get());
         } else {
-            AE2WebMod.LOGGER.info("[ItemIconService] No model found for {}, trying texture guess", modelId);
+            AE2WebMod.LOGGER.debug("[ItemIconService] No model found for {}, trying texture guess", modelId);
             textureId = resolveTextureByGuess(namespace, path);
             if (textureId.isPresent()) {
-                AE2WebMod.LOGGER.info("[ItemIconService] Found texture by guess: {}", textureId.get());
+                AE2WebMod.LOGGER.debug("[ItemIconService] Found texture by guess: {}", textureId.get());
             } else {
-                AE2WebMod.LOGGER.info("[ItemIconService] No texture found for item: {}", itemId);
+                AE2WebMod.LOGGER.debug("[ItemIconService] No texture found for item: {}", itemId);
             }
         }
 
         Optional<byte[]> result = textureId.flatMap(this::readTexturePng);
         if (result.isPresent()) {
-            AE2WebMod.LOGGER.info("[ItemIconService] Successfully loaded texture PNG for item: {} ({} bytes)", itemId, result.get().length);
+            AE2WebMod.LOGGER.debug("[ItemIconService] Successfully loaded texture PNG for item: {} ({} bytes)", itemId, result.get().length);
         } else if (textureId.isPresent()) {
-            AE2WebMod.LOGGER.info("[ItemIconService] Texture ID found but PNG file not readable: {}", textureId.get());
+            AE2WebMod.LOGGER.debug("[ItemIconService] Texture ID found but PNG file not readable: {}", textureId.get());
         }
         return result;
     }

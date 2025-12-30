@@ -10,6 +10,8 @@ public class ItemStackDTO {
     private final long amount;
     private final String namespace;
 
+    public String materialColor;
+
     public ItemStackDTO(AEItemKey key, long amount, String name, String translationKey) {
         ResourceLocation itemId = key.getId();
         this.id = itemId.toString();

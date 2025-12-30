@@ -33,13 +33,13 @@ public final class MinecraftAssetIndex {
         this.indexFile = pickIndexFile(indexesDir).orElse(null);
         this.objectHashes = null;
 
-        AE2WebMod.LOGGER.info("[MinecraftAssetIndex] Initialized with assetsDir: {}", assetsDir);
-        AE2WebMod.LOGGER.info("[MinecraftAssetIndex] objectsDir: {}, exists: {}", objectsDir, java.nio.file.Files.isDirectory(objectsDir));
-        AE2WebMod.LOGGER.info("[MinecraftAssetIndex] indexesDir: {}, exists: {}", indexesDir, java.nio.file.Files.isDirectory(indexesDir));
+        AE2WebMod.LOGGER.debug("[MinecraftAssetIndex] Initialized with assetsDir: {}", assetsDir);
+        AE2WebMod.LOGGER.debug("[MinecraftAssetIndex] objectsDir: {}, exists: {}", objectsDir, java.nio.file.Files.isDirectory(objectsDir));
+        AE2WebMod.LOGGER.debug("[MinecraftAssetIndex] indexesDir: {}, exists: {}", indexesDir, java.nio.file.Files.isDirectory(indexesDir));
         if (indexFile != null) {
-            AE2WebMod.LOGGER.info("[MinecraftAssetIndex] Using index file: {}", indexFile);
+            AE2WebMod.LOGGER.debug("[MinecraftAssetIndex] Using index file: {}", indexFile);
         } else {
-            AE2WebMod.LOGGER.info("[MinecraftAssetIndex] No index file found in: {}", indexesDir);
+            AE2WebMod.LOGGER.debug("[MinecraftAssetIndex] No index file found in: {}", indexesDir);
         }
     }
 
@@ -94,7 +94,7 @@ public final class MinecraftAssetIndex {
             }
 
             Map<String, String> hashes = new HashMap<>();
-            AE2WebMod.LOGGER.info("[MinecraftAssetIndex] Loading asset index from: {}", indexFile);
+            AE2WebMod.LOGGER.debug("[MinecraftAssetIndex] Loading asset index from: {}", indexFile);
             try (InputStream is = Files.newInputStream(indexFile);
                  InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                 JsonObject root = GSON.fromJson(reader, JsonObject.class);
@@ -108,9 +108,9 @@ public final class MinecraftAssetIndex {
                         hashes.put(entry.getKey(), obj.get("hash").getAsString());
                     }
                 }
-                AE2WebMod.LOGGER.info("[MinecraftAssetIndex] Loaded {} asset hashes from index", hashes.size());
+                AE2WebMod.LOGGER.debug("[MinecraftAssetIndex] Loaded {} asset hashes from index", hashes.size());
             } catch (Exception e) {
-                AE2WebMod.LOGGER.info("[MinecraftAssetIndex] Failed to load asset index: {}", e.getMessage());
+                AE2WebMod.LOGGER.debug("[MinecraftAssetIndex] Failed to load asset index: {}", e.getMessage());
                 AE2WebMod.LOGGER.warn("Failed to load Minecraft assets index {}", indexFile, e);
             }
 

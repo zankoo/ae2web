@@ -107,16 +107,16 @@ public final class TranslationService {
         String cacheKey = namespace + ":" + lang;
         return cache.computeIfAbsent(cacheKey, ignored -> {
             String langPath = namespace + "/lang/" + lang + ".json";
-            AE2WebMod.LOGGER.info("[TranslationService] Attempting to load language file: {}", langPath);
+            AE2WebMod.LOGGER.debug("[TranslationService] Attempting to load language file: {}", langPath);
             try (InputStream is = openLangStream(namespace, lang).orElse(null)) {
                 if (is == null) {
-                    AE2WebMod.LOGGER.info("[TranslationService] Language file not found: {}", langPath);
+                    AE2WebMod.LOGGER.debug("[TranslationService] Language file not found: {}", langPath);
                     return Collections.emptyMap();
                 }
                 try (InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                     JsonObject root = GSON.fromJson(reader, JsonObject.class);
                     if (root == null) {
-                        AE2WebMod.LOGGER.info("[TranslationService] Language file empty or invalid JSON: {}", langPath);
+                        AE2WebMod.LOGGER.debug("[TranslationService] Language file empty or invalid JSON: {}", langPath);
                         return Collections.emptyMap();
                     }
                     Map<String, String> map = new HashMap<>(root.size());
@@ -125,11 +125,11 @@ public final class TranslationService {
                             map.put(entry.getKey(), entry.getValue().getAsString());
                         }
                     }
-                    AE2WebMod.LOGGER.info("[TranslationService] Successfully loaded {} translation keys from: {}", map.size(), langPath);
+                    AE2WebMod.LOGGER.debug("[TranslationService] Successfully loaded {} translation keys from: {}", map.size(), langPath);
                     return map;
                 }
             } catch (Exception e) {
-                AE2WebMod.LOGGER.info("[TranslationService] Failed to load language file: {} - {}", langPath, e.getMessage());
+                AE2WebMod.LOGGER.debug("[TranslationService] Failed to load language file: {} - {}", langPath, e.getMessage());
                 AE2WebMod.LOGGER.debug("Failed to load lang {}/lang/{}.json", namespace, lang, e);
                 return Collections.emptyMap();
             }

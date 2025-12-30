@@ -313,6 +313,13 @@ body {
     image-rendering: pixelated;
 }
 
+.material-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
 .item-emoji {
     line-height: 1;
 }

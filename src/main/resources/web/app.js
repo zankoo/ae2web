@@ -7,6 +7,26 @@ let selectedItem = null;
 let refreshInterval = null;
 let currentLang = null;
 
+const CDN_ICON_BASE_URL = 'https://unpkg.com/minecraft-assets@1.15.0/minecraft-assets/data/1.20.2/items/';
+const MC_LANG_CDN_URL = 'https://unpkg.com/minecraft-assets@1.15.0/minecraft-assets/data/1.20.2/language.json';
+const PLACEHOLDER_ICON_URL = (() => {
+    const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+            <rect x="1" y="1" width="30" height="30" rx="6" fill="#1a1a25" stroke="#2a2a3a" stroke-width="2"/>
+            <text x="16" y="21" text-anchor="middle" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+                  font-size="18" fill="#606070">?</text>
+        </svg>
+    `.trim();
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+})();
+
+// Cache icon resolution results to avoid repeated 404/CDN fetches
+const itemIconCache = new Map(); // itemId -> resolved src (CDN or placeholder)
+const missingServerIcons = new Set(); // itemId known to 404 on /api/item-icon
+
+let minecraftTranslations = null;
+let minecraftTranslationsLoading = false;
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
@@ -122,6 +142,8 @@ async function loadItems() {
     const grid = document.getElementById('inventory-grid');
 
     try {
+        loadMinecraftTranslations();
+
         const params = new URLSearchParams({
             page: currentPage,
             pageSize: 50,
@@ -139,6 +161,41 @@ async function loadItems() {
             </div>
         `;
     }
+}
+
+async function loadMinecraftTranslations() {
+    if (minecraftTranslations !== null) return minecraftTranslations;
+    if (minecraftTranslationsLoading) return minecraftTranslations;
+
+    minecraftTranslationsLoading = true;
+    try {
+        const response = await fetch(MC_LANG_CDN_URL);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch language.json (HTTP ${response.status})`);
+        }
+
+        const json = await response.json();
+        minecraftTranslations = json && typeof json === 'object' ? json : {};
+    } catch (error) {
+        console.warn('Failed to load Minecraft translations from CDN:', error);
+        minecraftTranslations = {};
+    } finally {
+        minecraftTranslationsLoading = false;
+    }
+
+    return minecraftTranslations;
+}
+
+function translateItemName(item) {
+    const displayName = item?.displayName ?? item?.name ?? '';
+    if (!displayName) return displayName;
+
+    // Best-effort heuristic: translation keys tend to have dots and start with lowercase.
+    if (!displayName.includes('.') || /^[A-Z]/.test(displayName)) return displayName;
+
+    const translationKey = item?.translationKey ?? displayName;
+    const translated = minecraftTranslations?.[translationKey];
+    return typeof translated === 'string' && translated.trim() ? translated : displayName;
 }
 
 function renderItems(data) {
@@ -159,20 +216,182 @@ function renderItems(data) {
         return;
     }
 
-    grid.innerHTML = data.items.map(item => `
-        <div class="item-card" onclick="openCraftModal('${escapeHtml(item.id)}', '${escapeHtml(item.name)}')">
-            <div class="item-icon">
-                <img class="item-icon-img" loading="lazy"
-                     src="/api/item-icon?id=${encodeURIComponent(item.id)}"
-                     onload="this.nextElementSibling.style.display='none'"
-                     onerror="this.style.display='none'">
-                <span class="item-emoji">${getItemEmoji(item.namespace)}</span>
+    grid.innerHTML = data.items.map(item => {
+        const itemName = translateItemName(item);
+        const materialColor = normalizeMaterialColor(item.materialColor);
+        const materialAttr = materialColor ? ` data-material-color="${escapeHtml(materialColor)}"` : '';
+
+        return `
+            <div class="item-card" data-item-id="${escapeHtml(item.id)}" data-item-name="${escapeHtml(itemName)}">
+                <div class="item-icon">
+                    <img class="item-icon-img" loading="lazy" alt="${escapeHtml(itemName)}"
+                         data-icon-item-id="${escapeHtml(item.id)}"${materialAttr}>
+                    <span class="item-emoji">${getItemEmoji(item.namespace)}</span>
+                </div>
+                <div class="item-name" title="${escapeHtml(itemName)}">${escapeHtml(itemName)}</div>
+                <div class="item-id" title="${escapeHtml(item.id)}">${escapeHtml(item.id)}</div>
+                <div class="item-amount">${formatNumber(item.amount)}</div>
             </div>
-            <div class="item-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
-            <div class="item-id" title="${escapeHtml(item.id)}">${escapeHtml(item.id)}</div>
-            <div class="item-amount">${formatNumber(item.amount)}</div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
+
+    wireInventoryGrid(grid);
+}
+
+function wireInventoryGrid(grid) {
+    grid.querySelectorAll('.item-card').forEach(card => {
+        const itemId = card.dataset.itemId;
+        const itemName = card.dataset.itemName;
+        card.addEventListener('click', () => openCraftModal(itemId, itemName));
+    });
+
+    grid.querySelectorAll('.item-icon-img').forEach(img => {
+        const itemId = img.dataset.iconItemId;
+        initItemIcon(img, itemId);
+    });
+}
+
+function getServerIconUrl(itemId) {
+    return `/api/item-icon?id=${encodeURIComponent(itemId)}`;
+}
+
+function getCdnIconUrl(itemId) {
+    if (!itemId) return null;
+
+    const [namespace, rawPath] = itemId.includes(':') ? itemId.split(':', 2) : ['minecraft', itemId];
+    // CDN only hosts vanilla assets, avoid repeated failed fetches for modded items.
+    if (namespace !== 'minecraft') return null;
+
+    const path = (rawPath || '').trim();
+    if (!path) return null;
+
+    // Best-effort sanitization: keep typical registry characters only.
+    const safePath = path.replace(/[^a-zA-Z0-9_./-]/g, '');
+    if (!safePath) return null;
+
+    return `${CDN_ICON_BASE_URL}${safePath}.png`;
+}
+
+function setIconSrc(img, itemId, src, source) {
+    img.dataset.iconSource = source;
+    img.crossOrigin = 'anonymous';
+    img.src = src;
+}
+
+function hideEmojiForIcon(img) {
+    const emoji = img.parentElement?.querySelector('.item-emoji');
+    if (emoji) {
+        emoji.style.display = 'none';
+    }
+}
+
+function normalizeMaterialColor(value) {
+    if (!value) return null;
+
+    const raw = String(value).trim();
+    if (!/^[0-9a-fA-F]{6}$/.test(raw)) return null;
+
+    return raw.toUpperCase();
+}
+
+function showMaterialIcon(img) {
+    const color = normalizeMaterialColor(img.dataset.materialColor);
+    if (!color) return false;
+
+    const container = img.parentElement;
+    if (!container) return false;
+
+    let icon = container.querySelector('.material-icon');
+    if (!icon) {
+        icon = document.createElement('div');
+        icon.className = 'material-icon';
+        container.insertBefore(icon, img.nextSibling);
+    }
+
+    icon.style.backgroundColor = `#${color}`;
+    icon.dataset.materialColor = color;
+    icon.style.display = 'inline-block';
+
+    img.dataset.iconSource = 'material';
+    img.style.display = 'none';
+    hideEmojiForIcon(img);
+    return true;
+}
+
+function initItemIcon(img, itemId) {
+    img.crossOrigin = 'anonymous';
+
+    img.addEventListener('load', () => {
+        hideEmojiForIcon(img);
+        const source = img.dataset.iconSource;
+        if (source === 'cdn' || source === 'placeholder') {
+            itemIconCache.set(itemId, img.src);
+        }
+    });
+    img.addEventListener('error', () => handleItemIconError(img, itemId));
+
+    const cached = itemIconCache.get(itemId);
+    if (cached) {
+        if (cached === PLACEHOLDER_ICON_URL && showMaterialIcon(img)) {
+            return;
+        }
+        setIconSrc(img, itemId, cached, cached === PLACEHOLDER_ICON_URL ? 'placeholder' : 'cdn');
+        return;
+    }
+
+    if (missingServerIcons.has(itemId)) {
+        const cdnUrl = getCdnIconUrl(itemId);
+        if (cdnUrl) {
+            setIconSrc(img, itemId, cdnUrl, 'cdn');
+        } else if (showMaterialIcon(img)) {
+            // Material-based placeholder for modded items with no server icon
+        } else {
+            setIconSrc(img, itemId, PLACEHOLDER_ICON_URL, 'placeholder');
+        }
+        return;
+    }
+
+    setIconSrc(img, itemId, getServerIconUrl(itemId), 'server');
+}
+
+async function handleItemIconError(img, itemId) {
+    const source = img.dataset.iconSource;
+    if (source === 'cdn') {
+        if (showMaterialIcon(img)) return;
+        setIconSrc(img, itemId, PLACEHOLDER_ICON_URL, 'placeholder');
+        return;
+    }
+    if (source === 'placeholder') {
+        return;
+    }
+    if (source === 'material') {
+        return;
+    }
+
+    // Source === 'server': only fall back to CDN when server returns 404.
+    let status = null;
+    try {
+        const res = await fetch(getServerIconUrl(itemId), { method: 'GET' });
+        status = res.status;
+    } catch {
+        // Network/server error: treat as non-404 and show placeholder.
+    }
+
+    if (status === 404) {
+        missingServerIcons.add(itemId);
+        const cdnUrl = getCdnIconUrl(itemId);
+        if (cdnUrl) {
+            setIconSrc(img, itemId, cdnUrl, 'cdn');
+        } else if (showMaterialIcon(img)) {
+            return;
+        } else {
+            setIconSrc(img, itemId, PLACEHOLDER_ICON_URL, 'placeholder');
+        }
+        return;
+    }
+
+    if (showMaterialIcon(img)) return;
+    setIconSrc(img, itemId, PLACEHOLDER_ICON_URL, 'placeholder');
 }
 
 function updatePagination(data) {
