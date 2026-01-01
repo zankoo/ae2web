@@ -24,6 +24,24 @@ Offline build (recommended for agents in constrained environments):
 ./gradlew build --offline
 ```
 
+If Gradle fails early with a ForgeGradle certificate pinning error like:
+
+```
+Failed to validate certificate for host 'https://libraries.minecraft.net/'
+```
+
+This is usually caused by upstream certificate rotation (or HTTPS interception). This repo defaults to disabling the pin check via `gradle.properties`:
+
+```properties
+systemProp.net.minecraftforge.gradle.check.certs=false
+```
+
+To re-enable for stricter validation, remove that line or run with:
+
+```bash
+./gradlew build -Dnet.minecraftforge.gradle.check.certs=true
+```
+
 ## Architecture (Current)
 
 **Main entry:** `src/main/java/com/kokoda/ae2web/AE2WebMod.java`
