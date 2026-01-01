@@ -5,6 +5,10 @@ import { openCraftModal } from './craft.js';
 
 let iconObserver = null;
 const loadedIcons = new Set();
+const ICON_RETRY_BASE_MS = 1500;
+const ICON_RETRY_MAX_MS = 30000;
+const ICON_RETRY_MAX_ATTEMPTS = 6;
+const iconRetryTimers = new WeakMap();
 
 let inventoryItems = [];
 const inventorySlotById = new Map();
@@ -18,6 +22,48 @@ function iconUrlFor(iconKey) {
         return `/api/prerender/image?id=${encodeURIComponent(iconKey)}&token=${encodeURIComponent(AUTH_TOKEN)}`;
     }
     return `/api/prerender/image?id=${encodeURIComponent(iconKey)}`;
+}
+
+function scheduleIconRetry(img) {
+    if (!img?.dataset?.iconSrc) {
+        return;
+    }
+
+    const iconKey = img.dataset.iconKey;
+    if (iconKey && loadedIcons.has(iconKey)) {
+        return;
+    }
+
+    const attempts = Number(img.dataset.retryAttempts || '0');
+    if (attempts >= ICON_RETRY_MAX_ATTEMPTS) {
+        return;
+    }
+
+    const nextAttempts = attempts + 1;
+    img.dataset.retryAttempts = String(nextAttempts);
+
+    const delay = Math.min(ICON_RETRY_BASE_MS * (2 ** (nextAttempts - 1)), ICON_RETRY_MAX_MS);
+    const prevTimer = iconRetryTimers.get(img);
+    if (prevTimer) {
+        clearTimeout(prevTimer);
+    }
+
+    const timer = setTimeout(() => {
+        iconRetryTimers.delete(img);
+        if (!img.isConnected) {
+            return;
+        }
+        if (iconKey && loadedIcons.has(iconKey)) {
+            return;
+        }
+        const iconSrc = img.dataset.iconSrc;
+        if (!iconSrc) {
+            return;
+        }
+        img.src = iconSrc;
+    }, delay);
+
+    iconRetryTimers.set(img, timer);
 }
 
 export function bindInventoryClickHandlers() {
@@ -310,12 +356,36 @@ function createItemSlot(item) {
     img.loading = 'lazy';
 
     const iconUrl = iconUrlFor(item.iconKey);
+    img.dataset.iconKey = item.iconKey;
+    img.dataset.iconSrc = iconUrl;
     if (loadedIcons.has(item.iconKey)) {
         img.src = iconUrl;
     } else {
         img.src = PLACEHOLDER_ICON;
         img.dataset.src = iconUrl;
     }
+
+    img.onload = () => {
+        const iconKey = img.dataset.iconKey;
+        const desired = img.dataset.iconSrc;
+        if (!iconKey || !desired) {
+            return;
+        }
+
+        const desiredAbs = new URL(desired, window.location.href).href;
+        const current = img.currentSrc || img.src || '';
+        if (current !== desiredAbs) {
+            return;
+        }
+
+        loadedIcons.add(iconKey);
+        delete img.dataset.retryAttempts;
+    };
+
+    img.onerror = () => {
+        img.src = PLACEHOLDER_ICON;
+        scheduleIconRetry(img);
+    };
 
     const name = document.createElement('span');
     name.className = 'item-name';
@@ -581,13 +651,9 @@ function ensureIconObserver() {
                 return;
             }
 
-            const iconId = img.closest('.item-slot')?.dataset.iconId;
-            img.src = img.dataset.src;
+            // Kick off icon load. Leave retry/onerror handling to the <img> handlers set in createItemSlot().
+            img.src = img.dataset.iconSrc || img.dataset.src;
             img.removeAttribute('data-src');
-            img.onload = () => {
-                if (iconId) loadedIcons.add(iconId);
-            };
-            img.onerror = () => { img.src = PLACEHOLDER_ICON; };
             obs.unobserve(img);
         });
     });
