@@ -55,8 +55,8 @@ public class AE2WebConfig {
                 .defineInRange("cacheSize", 1024, 100, 10000);
 
         PRERENDER_AUTO_MAX_ITEMS = BUILDER
-                .comment("Maximum number of items to auto-render when player joins")
-                .defineInRange("autoMaxItems", 500, 10, 5000);
+                .comment("Maximum number of items to auto-render when player joins (0 = unlimited)")
+                .defineInRange("autoMaxItems", 0, 0, 100000);
 
         BUILDER.pop();
         SPEC = BUILDER.build();

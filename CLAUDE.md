@@ -6,6 +6,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AE2 Web Terminal is a Minecraft Forge mod (1.20.1) that adds a Web Terminal block connecting to Applied Energistics 2 ME networks. It exposes network inventory through an embedded HTTP server, allowing players to browse items, search, and submit crafting requests from any web browser.
 
+## 修改审批流程（必须严格遵守）
+
+**所有代码修改必须先提出方案，经用户同意后再执行。**
+
+### 流程
+
+1. **分析问题**：收集信息、调试、理解根因
+2. **提出方案**：清晰描述修改内容、影响范围、tradeoff
+3. **等待审批**：用户明确同意后才能修改代码
+4. **执行修改**：按照已批准的方案进行修改
+5. **验证结果**：构建、测试、确认修复
+
+### 禁止事项
+
+- ❌ 未经同意直接修改代码
+- ❌ 在分析阶段就开始写代码
+- ❌ 假设用户会同意某个方案
+
+### 例外情况
+
+- 用户明确说"直接改"或"你决定"
+- 纯粹的格式化/typo 修复
+- 用户已批准的方案的后续步骤
+
 ## Build Commands
 
 ```bash
@@ -38,6 +62,25 @@ AE2 Web Terminal is a Minecraft Forge mod (1.20.1) that adds a Web Terminal bloc
 - `GET /api/cpus` - Crafting CPU status (TODO: not fully implemented)
 
 **Static Web Resources:** `src/main/resources/web/` contains index.html, app.js, style.css
+
+## Frontend Development Guidelines
+
+**必须使用 `frontend-design` skill 进行前端 UI 修改。**
+
+当涉及以下前端修改时，必须调用 `frontend-design` skill：
+- 新增或修改 HTML 结构
+- 新增或修改 CSS 样式
+- UI 组件设计（按钮、面板、模态框等）
+- 布局调整
+- 视觉效果和动画
+
+这确保前端修改遵循项目的科幻终端美学风格，保持设计一致性。
+
+**当前设计规范：**
+- 主题：深色科幻终端风格
+- 主字体：Rajdhani（标题）、Share Tech Mono（数据）
+- 主色调：`--ae2-accent: #00d4aa`（青绿色）、`--ae2-cyan: #22d3ee`
+- 支持中文显示（Microsoft YaHei 作为后备字体）
 
 ## Key Dependencies
 
@@ -130,6 +173,14 @@ Codex 是 Claude 的 AI 伙伴工具，可以通过命令行执行任务。通�
 ```bash
 codex exec "continue to next task" --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox
 ```
+
+### 模型配置
+
+**必须使用 gpt-5.2 模型执行 Codex 任务**
+
+- Codex 默认会使用 gpt-5.2 模型（如配置文件中设置）
+- 如需在命令中显式指定：`codex exec "task" --model gpt-5.2`
+- gpt-5.2 提供更强的推理能力和代码质量，适合复杂任务
 
 ### 工作流程（项目管理者模式）
 

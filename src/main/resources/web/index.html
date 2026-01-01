@@ -4,100 +4,244 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AE2 Web Terminal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <!-- Pinyin Search Support -->
+    <script src="https://cdn.jsdelivr.net/npm/pinyin-match@1.2.5/dist/main.min.js"></script>
 </head>
 <body>
-    <div class="app">
-        <header class="header">
-            <div class="header-content">
-                <h1 class="logo">
-                    <span class="logo-icon">⚡</span>
-                    AE2 Web Terminal
-                </h1>
-                <div class="status-bar">
-                    <span id="connection-status" class="status disconnected">
-                        <span class="status-dot"></span>
-                        <span class="status-text">Connecting...</span>
-                    </span>
-                    <span id="terminal-count" class="terminal-count">0 Terminals</span>
+    <div class="terminal-container">
+        <!-- Header -->
+        <header class="terminal-header">
+	            <div class="logo-section">
+	                <div class="logo-icon">
+	                    <img id="logo-img" src="logo.svg" alt="Terminal">
+	                </div>
+	                <div class="logo-text">
+	                    <h1>AE2 Web Terminal</h1>
+	                    <span>ME Network Interface v1.8</span>
+	                </div>
+            </div>
+
+            <div class="network-selector">
+                <div class="network-frame">
+                    <div class="network-indicator">
+                        <svg class="network-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        <div class="signal-rings">
+                            <div class="ring ring-1"></div>
+                            <div class="ring ring-2"></div>
+                            <div class="ring ring-3"></div>
+                        </div>
+                    </div>
+	                    <div class="network-select-wrapper">
+	                        <span class="network-label">NETWORK LINK</span>
+	                        <select id="terminal-select">
+	                            <option value="">Loading...</option>
+	                        </select>
+	                        <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                            <polyline points="6 9 12 15 18 9"/>
+	                        </svg>
+                    </div>
+                    <div class="connection-bar"></div>
+                </div>
+            </div>
+
+            <div class="status-section">
+                <div class="stat-box">
+                    <div class="stat-label">Total Items</div>
+                    <div class="stat-value items" id="total-items">0</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Types</div>
+                    <div class="stat-value" id="item-types">0</div>
+                </div>
+                <div class="status-indicator">
+                    <div id="status-led" class="status-led"></div>
+                    <span id="status-text" class="online">ONLINE</span>
                 </div>
             </div>
         </header>
 
-        <main class="main-content">
-            <aside class="sidebar">
+        <!-- Main Content -->
+        <main class="terminal-main">
+            <!-- Inventory Panel -->
+            <section class="inventory-panel">
+	                <div class="panel-header">
+	                    <div class="panel-title">Network Storage</div>
+	                    <div class="filter-toggle">
+	                        <button class="filter-btn active" data-filter="all" type="button">All</button>
+	                        <button class="filter-btn" data-filter="items" type="button">Items</button>
+	                        <button class="filter-btn" data-filter="fluids" type="button">Fluids</button>
+	                    </div>
+	                </div>
+
                 <div class="search-container">
-                    <input type="text" id="search-input" class="search-input" placeholder="Search items...">
-                    <button id="search-btn" class="search-btn">🔍</button>
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <input type="text" id="search-input" class="search-input" placeholder="Search by name, ID or pinyin (e.g. zsj = 钻石剑)">
                 </div>
-                
-                <div class="terminals-panel">
-                    <h3>Connected Terminals</h3>
-                    <ul id="terminal-list" class="terminal-list">
-                        <!-- Terminals will be populated here -->
-                    </ul>
+
+                <div class="inventory-scroll">
+                    <div id="inventory-grid" class="inventory-grid">
+                        <!-- Items injected here -->
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- Side Panel -->
+            <aside class="side-panel">
+                <!-- Terminal Stats -->
+                <div class="info-card">
+                    <div class="info-card-header">Terminal Data</div>
+                    <div class="info-card-body">
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <div class="stat-item-label">Storage</div>
+                                <div class="stat-item-value cyan" id="storage-used">--</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-item-label">Channels</div>
+                                <div class="stat-item-value purple">1/8</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+	                <div class="info-card">
+	                    <div class="info-card-header">Quick Actions</div>
+	                    <div class="info-card-body">
+	                        <div class="action-grid">
+	                            <button class="action-btn" type="button" data-action="refresh">
+	                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+	                                    <path d="M3 3v5h5"></path>
+	                                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+	                                    <path d="M16 16h5v5"></path>
+	                                </svg>
+	                                Refresh
+	                            </button>
+	                            <button class="action-btn" type="button" data-action="search">
+	                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                                    <circle cx="11" cy="11" r="8"></circle>
+	                                    <path d="m21 21-4.35-4.35"></path>
+	                                </svg>
+	                                Search
+	                            </button>
+	                            <button class="action-btn" type="button" data-action="top">
+	                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                                    <path d="m18 15-6-6-6 6"></path>
+	                                    <path d="M12 9v12"></path>
+	                                </svg>
+	                                Top
+	                            </button>
+	                            <button class="action-btn" type="button" data-action="clear-search">
+	                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                                    <path d="M18 6 6 18"></path>
+	                                    <path d="m6 6 12 12"></path>
+	                                </svg>
+	                                Clear
+	                            </button>
+	                        </div>
+	                    </div>
+	                </div>
+
+                <!-- CPU Status Panel -->
+                <div class="info-card cpu-panel">
+                    <div class="info-card-header">
+                        <svg class="cpu-header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="4" y="4" width="16" height="16" rx="2"/>
+                            <rect x="9" y="9" width="6" height="6"/>
+                            <path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>
+                        </svg>
+                        <span>Crafting CPUs</span>
+                        <span class="cpu-count" id="cpu-count">0</span>
+                    </div>
+                    <div class="cpu-list" id="cpu-list">
+                        <div class="cpu-empty">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="4 2"/>
+                                <path d="M9 9h6M9 12h6M9 15h3"/>
+                            </svg>
+                            <span>No CPUs detected</span>
+                        </div>
+                    </div>
                 </div>
             </aside>
-
-            <section class="inventory-section">
-                <div class="inventory-header">
-                    <h2>Network Inventory</h2>
-                    <div class="inventory-stats">
-                        <span id="item-count">0 items</span>
-                        <span id="total-items">0 total</span>
-                    </div>
-                </div>
-
-                <div id="inventory-grid" class="inventory-grid">
-                    <!-- Items will be populated here -->
-                    <div class="loading-state">
-                        <div class="spinner"></div>
-                        <p>Loading inventory...</p>
-                    </div>
-                </div>
-
-                <div class="pagination">
-                    <button id="prev-page" class="page-btn" disabled>← Previous</button>
-                    <span id="page-info" class="page-info">Page 1 of 1</span>
-                    <button id="next-page" class="page-btn" disabled>Next →</button>
-                </div>
-            </section>
         </main>
-
-        <!-- Craft Modal -->
-        <div id="craft-modal" class="modal hidden">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>Request Crafting</h3>
-                    <button class="modal-close" onclick="closeCraftModal()">×</button>
-                </div>
-                <div class="modal-body">
-                    <div id="craft-item-info" class="craft-item-info">
-                        <span id="craft-item-name" class="item-name"></span>
-                        <span id="craft-item-id" class="item-id"></span>
+	    </div>
+	
+	    <!-- Crafting Modal -->
+	    <div id="craft-modal" class="modal-overlay">
+	        <div class="modal-content">
+            <div class="modal-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m15 12-8.5 8.5c-.83.83-2.17.83-3 0 0 0 0 0 0 0a2.12 2.12 0 0 1 0-3L12 9"></path>
+                    <path d="M17.64 15 22 10.64"></path>
+                    <path d="m20.91 11.7-1.25-1.25c-.6-.6-.93-1.4-.93-2.25v-.86L16.01 4.6a5.56 5.56 0 0 0-3.94-1.64H9l.92.82A6.18 6.18 0 0 1 12 8.4v1.56l2 2h2.47l2.26 1.91"></path>
+                </svg>
+                <h3>Crafting Request</h3>
+            </div>
+            <div class="modal-body">
+                <div class="craft-item-display">
+                    <div class="craft-item-icon" id="craft-icon-container">
+                        <!-- Icon injected -->
                     </div>
-                    <div class="form-group">
-                        <label for="craft-amount">Amount to craft:</label>
-                        <input type="number" id="craft-amount" value="1" min="1" max="9999">
-                    </div>
-                    <div class="quick-amounts">
-                        <button onclick="setCraftAmount(1)">1</button>
-                        <button onclick="setCraftAmount(16)">16</button>
-                        <button onclick="setCraftAmount(64)">64</button>
-                        <button onclick="setCraftAmount(256)">256</button>
+                    <div class="craft-item-info">
+                        <div class="craft-item-name" id="craft-item-name">Item Name</div>
+                        <div class="craft-item-id" id="craft-item-id">minecraft:item</div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" onclick="closeCraftModal()">Cancel</button>
-                    <button class="btn btn-primary" onclick="submitCraft()">Start Crafting</button>
+	                <div class="amount-section">
+	                    <label>Quantity</label>
+	                    <input type="number" id="craft-amount" class="amount-input" value="1" min="1" max="64000">
+	                    <div class="quick-amounts">
+	                        <button class="quick-amount-btn" type="button" data-amount="1">1</button>
+	                        <button class="quick-amount-btn" type="button" data-amount="16">16</button>
+	                        <button class="quick-amount-btn" type="button" data-amount="64">64</button>
+	                        <button class="quick-amount-btn" type="button" data-amount="256">256</button>
+	                    </div>
+	                </div>
+                <div class="cpu-select-section">
+                    <label>Target CPU</label>
+                    <div class="cpu-select-wrapper">
+                        <svg class="cpu-select-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="4" y="4" width="16" height="16" rx="2"/>
+                            <rect x="9" y="9" width="6" height="6"/>
+                            <path d="M9 1v3M15 1v3M9 20v3M15 20v3"/>
+                        </svg>
+                        <select id="craft-cpu-select" class="cpu-select">
+                            <option value="">Auto (Any Available)</option>
+                        </select>
+                        <svg class="cpu-select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
                 </div>
+	            </div>
+	            <div class="modal-footer">
+	                <button id="craft-cancel-btn" class="btn-cancel" type="button">Cancel</button>
+	                <button id="craft-confirm-btn" class="btn-confirm" type="button">
+	                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+	                        <polyline points="20 6 9 17 4 12"></polyline>
+	                    </svg>
+	                    Confirm
+	                </button>
             </div>
         </div>
-
-        <!-- Toast Notifications -->
-        <div id="toast-container" class="toast-container"></div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <script type="module" src="js/app.js"></script>
 </body>
 </html>

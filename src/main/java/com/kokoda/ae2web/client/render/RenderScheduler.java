@@ -1,27 +1,47 @@
 package com.kokoda.ae2web.client.render;
 
+import appeng.api.stacks.AEFluidKey;
+import appeng.api.stacks.AEItemKey;
 import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.client.network.PrerenderHttpClient;
+import com.kokoda.ae2web.util.IconKeyUtils;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtIo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.TextColor;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fluids.FluidStack;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
- * Schedules item rendering across multiple frames to avoid lag.
- * Processes N items per frame based on configuration.
+ * Schedules item rendering across multiple frames.
+ * Optimized for fast rendering - user experience on web UI is prioritized over client smoothness.
  */
 @OnlyIn(Dist.CLIENT)
 public class RenderScheduler {
-    private static final int DEFAULT_ITEMS_PER_FRAME = 3;
+    private static final int DEFAULT_ITEMS_PER_FRAME = 50; // Optimized for speed
 
     private static RenderScheduler instance;
 
@@ -31,8 +51,12 @@ public class RenderScheduler {
     private final AtomicBoolean isActive = new AtomicBoolean(false);
     private final AtomicBoolean isPaused = new AtomicBoolean(false);
     private final AtomicInteger completedCount = new AtomicInteger(0);
-    private int totalTasks = 0;
-    private Consumer<RenderProgress> progressListener;
+    private final AtomicInteger successfulCount = new AtomicInteger(0);
+    private final AtomicInteger inFlightCount = new AtomicInteger(0);
+    private final AtomicBoolean queueDrained = new AtomicBoolean(false);
+    private final AtomicLong runId = new AtomicLong(0);
+    private volatile int totalTasks = 0;
+    private volatile Consumer<RenderProgress> progressListener;
     private long lastProgressUpdate = 0;
 
     private RenderScheduler() {
@@ -48,24 +72,51 @@ public class RenderScheduler {
 
     public record RenderProgress(int completed, int total, ResourceLocation current) {}
 
-    private record RenderTask(ResourceLocation itemId, Consumer<byte[]> onComplete) {}
+    /**
+     * Result of rendering an item: PNG bytes and translated name.
+     */
+    public record RenderResult(byte[] png, String translatedName, List<String> tooltip) {}
+
+    /**
+     * Render task with optional NBT data and iconKey.
+     * Completion is defined as: server responded to upload (icon saved or upload failed).
+     */
+    private record RenderTask(ResourceLocation itemId, String iconKey, byte[] nbtData,
+                              String serverUrl, long runId, CompletableFuture<Boolean> completion,
+                              Consumer<RenderResult> onRenderComplete) {}
+
+    private void startNewRunIfNeededLocked() {
+        if (isActive.get()) {
+            return;
+        }
+
+        runId.incrementAndGet();
+        completedCount.set(0);
+        successfulCount.set(0);
+        inFlightCount.set(0);
+        totalTasks = 0;
+        queueDrained.set(false);
+    }
 
     /**
      * Submit a batch of items for rendering.
+     * If called while already rendering, adds items to the queue without resetting progress.
      */
     public void submitBatch(List<ResourceLocation> itemIds, String serverUrl) {
         if (itemIds.isEmpty()) return;
 
         synchronized (taskQueue) {
+            startNewRunIfNeededLocked();
+            long currentRunId = runId.get();
+            queueDrained.set(false);
+
+            int added = 0;
             for (ResourceLocation itemId : itemIds) {
-                taskQueue.add(new RenderTask(itemId, pngBytes -> {
-                    if (pngBytes != null) {
-                        PrerenderHttpClient.getInstance().uploadIcon(serverUrl, itemId.toString(), pngBytes);
-                    }
-                }));
+                String iconKey = computeDefaultIconKey(itemId);
+                taskQueue.add(new RenderTask(itemId, iconKey, null, serverUrl, currentRunId, new CompletableFuture<>(), null));
+                added++;
             }
-            totalTasks = taskQueue.size();
-            completedCount.set(0);
+            totalTasks += added;
             isActive.set(true);
         }
 
@@ -73,14 +124,128 @@ public class RenderScheduler {
     }
 
     /**
-     * Submit a single item for rendering.
+     * Submit a batch of iconKeys for rendering (for full re-render).
+     * iconKey format: {@code namespace:path@hash}.
      */
-    public void submitTask(ResourceLocation itemId, Consumer<byte[]> onComplete) {
+    public void submitBatchWithIconKeys(List<String> iconKeys, String serverUrl) {
+        if (iconKeys.isEmpty()) return;
+
         synchronized (taskQueue) {
-            taskQueue.add(new RenderTask(itemId, onComplete));
-            totalTasks = taskQueue.size() + completedCount.get();
+            startNewRunIfNeededLocked();
+            long currentRunId = runId.get();
+            queueDrained.set(false);
+
+            int added = 0;
+            for (String iconKey : iconKeys) {
+                if (iconKey == null || iconKey.isBlank()) {
+                    continue;
+                }
+
+                int atIndex = iconKey.lastIndexOf('@');
+                String itemIdStr = atIndex > 0 ? iconKey.substring(0, atIndex) : iconKey;
+                ResourceLocation itemId = ResourceLocation.tryParse(itemIdStr);
+                if (itemId == null) {
+                    AE2WebMod.LOGGER.warn("Invalid item ID in iconKey: {}", iconKey);
+                    continue;
+                }
+
+                added++;
+                taskQueue.add(new RenderTask(itemId, iconKey, null, serverUrl, currentRunId, new CompletableFuture<>(), null));
+            }
+
+            totalTasks += added;
+            isActive.set(true);
+
+            AE2WebMod.LOGGER.info("Submitted {} iconKeys for rendering", added);
+        }
+    }
+
+    /**
+     * Submit a batch of items with NBT data for rendering.
+     */
+    public void submitBatchWithNbt(List<PrerenderHttpClient.MissingIconItem> items, String serverUrl) {
+        submitBatchWithNbtTracked(items, serverUrl);
+    }
+
+    /**
+     * Submit a batch of items with NBT data for rendering and complete a future once every task from this submission
+     * has finished rendering (successfully or not). This avoids relying on "queue exhausted" semantics when producers
+     * may enqueue more work later.
+     */
+    public CompletableFuture<Integer> submitBatchWithNbtTracked(List<PrerenderHttpClient.MissingIconItem> items, String serverUrl) {
+        if (items.isEmpty()) {
+            return CompletableFuture.completedFuture(0);
+        }
+
+        List<CompletableFuture<Boolean>> completions = new ArrayList<>();
+        int added;
+
+        synchronized (taskQueue) {
+            startNewRunIfNeededLocked();
+            long currentRunId = runId.get();
+            queueDrained.set(false);
+
+            added = 0;
+            for (PrerenderHttpClient.MissingIconItem item : items) {
+                String iconKey = item.iconKey();
+                int atIndex = iconKey.lastIndexOf('@');
+                String itemIdStr = atIndex > 0 ? iconKey.substring(0, atIndex) : iconKey;
+                ResourceLocation itemId = ResourceLocation.tryParse(itemIdStr);
+
+                if (itemId == null) {
+                    AE2WebMod.LOGGER.warn("Invalid item ID in iconKey: {}", iconKey);
+                    continue;
+                }
+
+                CompletableFuture<Boolean> completion = new CompletableFuture<>();
+                completions.add(completion);
+                taskQueue.add(new RenderTask(itemId, iconKey, item.stackNbt(), serverUrl, currentRunId, completion, null));
+                added++;
+            }
+
+            totalTasks += added;
             isActive.set(true);
         }
+
+        if (added == 0) {
+            return CompletableFuture.completedFuture(0);
+        }
+
+        AE2WebMod.LOGGER.info("Submitted {} items with NBT for tracked rendering", added);
+
+        CompletableFuture<?> allDone = CompletableFuture.allOf(completions.toArray(new CompletableFuture[0]));
+        return allDone.thenApply(ignored -> (int) completions.stream().filter(f -> f.getNow(false)).count());
+    }
+
+    /**
+     * Submit a single item for rendering.
+     */
+    public void submitTask(ResourceLocation itemId, Consumer<RenderResult> onComplete) {
+        synchronized (taskQueue) {
+            startNewRunIfNeededLocked();
+            long currentRunId = runId.get();
+            queueDrained.set(false);
+
+            String iconKey = computeDefaultIconKey(itemId);
+            taskQueue.add(new RenderTask(itemId, iconKey, null, null, currentRunId, new CompletableFuture<>(), onComplete));
+            totalTasks += 1;
+            isActive.set(true);
+        }
+    }
+
+    private static String computeDefaultIconKey(ResourceLocation id) {
+        var item = BuiltInRegistries.ITEM.getOptional(id).orElse(null);
+        if (item != null) {
+            return IconKeyUtils.iconKey(AEItemKey.of(item));
+        }
+
+        var fluid = BuiltInRegistries.FLUID.getOptional(id).orElse(null);
+        if (fluid != null && fluid != Fluids.EMPTY) {
+            return IconKeyUtils.iconKey(AEFluidKey.of(fluid));
+        }
+
+        // Fallback: ensure we still upload an iconKey-shaped identifier.
+        return IconKeyUtils.iconKey(id);
     }
 
     /**
@@ -111,28 +276,244 @@ public class RenderScheduler {
             synchronized (taskQueue) {
                 task = taskQueue.poll();
                 if (task == null) {
-                    isActive.set(false);
-                    notifyComplete();
+                    if (queueDrained.compareAndSet(false, true)) {
+                        AE2WebMod.LOGGER.info("Render queue drained - waiting for {} in-flight uploads", inFlightCount.get());
+                    }
+
+                    tryFinalizeRun(task == null ? runId.get() : task.runId());
                     return;
                 }
             }
 
-            try {
-                ItemStack stack = ItemIconRenderer.getItemStack(task.itemId);
-                if (stack != null && !stack.isEmpty()) {
-                    byte[] png = renderer.renderItemToPng(stack);
-                    task.onComplete.accept(png);
-                } else {
-                    task.onComplete.accept(null);
-                }
-            } catch (Exception e) {
-                AE2WebMod.LOGGER.warn("Failed to render item: {}", task.itemId, e);
-                task.onComplete.accept(null);
+            if (task.runId() != runId.get()) {
+                task.completion().complete(false);
+                continue;
             }
 
-            completedCount.incrementAndGet();
-            notifyProgress(task.itemId);
+            inFlightCount.incrementAndGet();
+
+            try {
+                // Try rendering as item first
+                ItemStack stack = null;
+                if (task.nbtData != null && task.nbtData.length > 0) {
+                    try {
+                        CompoundTag data = NbtIo.readCompressed(new ByteArrayInputStream(task.nbtData));
+                        stack = ItemStack.of(data);
+                    } catch (IOException e) {
+                        AE2WebMod.LOGGER.warn("Failed to deserialize stackNbt for {}", task.iconKey, e);
+                    } catch (Exception e) {
+                        AE2WebMod.LOGGER.warn("Invalid stackNbt for {}", task.iconKey, e);
+                    }
+                }
+
+                if (stack == null || stack.isEmpty()) {
+                    stack = ItemIconRenderer.getItemStack(task.itemId);
+                }
+                if (stack != null && !stack.isEmpty()) {
+                    byte[] png = renderer.renderItemToPng(stack);
+                    String translatedName = stack.getHoverName().getString();
+                    List<String> tooltip = buildTooltipLines(stack);
+                    handleRendered(task, new RenderResult(png, translatedName, tooltip));
+                } else {
+                    // Try rendering as fluid
+                    FluidStack fluidStack = ItemIconRenderer.getFluidStack(task.itemId);
+                    if (fluidStack != null && !fluidStack.isEmpty()) {
+                        byte[] png = renderer.renderFluidToPng(fluidStack);
+                        String translatedName = fluidStack.getDisplayName().getString();
+                        handleRendered(task, new RenderResult(png, translatedName, List.of(translatedName)));
+                    } else {
+                        AE2WebMod.LOGGER.warn("Failed to render {} (iconKey={}): not found as item or fluid", task.itemId, task.iconKey);
+                        handleRendered(task, null);
+                    }
+                }
+            } catch (Exception e) {
+                AE2WebMod.LOGGER.warn("Failed to render: {}", task.itemId, e);
+                handleRendered(task, null);
+            }
         }
+    }
+
+    private void handleRendered(RenderTask task, RenderResult result) {
+        try {
+            if (task.onRenderComplete() != null) {
+                task.onRenderComplete().accept(result);
+            }
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.warn("Render callback failed for {}", task.itemId(), e);
+        }
+
+        if (result == null || result.png() == null) {
+            completeTask(task, false);
+            return;
+        }
+
+        if (task.serverUrl() == null || task.serverUrl().isBlank()) {
+            completeTask(task, false);
+            return;
+        }
+
+        PrerenderHttpClient.getInstance()
+                .uploadIcon(task.serverUrl(), task.iconKey(), result.png(), result.translatedName(), result.tooltip())
+                .handle((success, ex) -> {
+                    if (ex != null) {
+                        AE2WebMod.LOGGER.warn("Upload exception for {}: {}", task.iconKey(), ex.getMessage());
+                        completeTask(task, false);
+                    } else {
+                        if (success == null || !success) {
+                            AE2WebMod.LOGGER.warn("Failed to upload icon for {}", task.iconKey());
+                        }
+                        completeTask(task, success != null && success);
+                    }
+                    return null;
+                });
+    }
+
+    private static List<String> buildTooltipLines(ItemStack stack) {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            LocalPlayer player = mc.player;
+
+            TooltipFlag flag;
+            try {
+                boolean advanced = mc.options.advancedItemTooltips;
+                flag = advanced ? TooltipFlag.Default.ADVANCED : TooltipFlag.Default.NORMAL;
+            } catch (Exception ignored) {
+                flag = TooltipFlag.Default.NORMAL;
+            }
+
+            return stack.getTooltipLines(player, flag).stream()
+                    .map(RenderScheduler::componentToLegacy)
+                    .filter(s -> s != null && !s.isBlank())
+                    .collect(Collectors.toList());
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private static String componentToLegacy(Component component) {
+        if (component == null) {
+            return "";
+        }
+
+        StringBuilder out = new StringBuilder();
+        component.visit((style, text) -> {
+            if (text == null || text.isEmpty()) {
+                return Optional.empty();
+            }
+            out.append(styleToLegacy(style));
+            out.append(text);
+            return Optional.empty();
+        }, Style.EMPTY);
+        return out.toString();
+    }
+
+    private static String styleToLegacy(Style style) {
+        if (style == null) {
+            return "§r";
+        }
+
+        StringBuilder out = new StringBuilder("§r");
+
+        TextColor color = style.getColor();
+        if (color != null) {
+            String code = rgbToLegacyColorCode(color.getValue());
+            if (code != null) {
+                out.append('§').append(code);
+            } else {
+                out.append(rgbToLegacyHex(color.getValue()));
+            }
+        }
+
+        if (style.isBold()) out.append("§l");
+        if (style.isItalic()) out.append("§o");
+        if (style.isUnderlined()) out.append("§n");
+        if (style.isStrikethrough()) out.append("§m");
+        if (style.isObfuscated()) out.append("§k");
+
+        return out.toString();
+    }
+
+    private static String rgbToLegacyHex(int rgb) {
+        String hex = String.format("%06x", (rgb & 0xFFFFFF));
+        StringBuilder out = new StringBuilder("§x");
+        for (int i = 0; i < hex.length(); i++) {
+            out.append('§').append(hex.charAt(i));
+        }
+        return out.toString();
+    }
+
+    private static String rgbToLegacyColorCode(int rgb) {
+        int v = rgb & 0xFFFFFF;
+        // Mojmap ChatFormatting colors (0-15).
+        if (v == 0x000000) return "0";
+        if (v == 0x0000AA) return "1";
+        if (v == 0x00AA00) return "2";
+        if (v == 0x00AAAA) return "3";
+        if (v == 0xAA0000) return "4";
+        if (v == 0xAA00AA) return "5";
+        if (v == 0xFFAA00) return "6";
+        if (v == 0xAAAAAA) return "7";
+        if (v == 0x555555) return "8";
+        if (v == 0x5555FF) return "9";
+        if (v == 0x55FF55) return "a";
+        if (v == 0x55FFFF) return "b";
+        if (v == 0xFF5555) return "c";
+        if (v == 0xFF55FF) return "d";
+        if (v == 0xFFFF55) return "e";
+        if (v == 0xFFFFFF) return "f";
+        return null;
+    }
+
+    private void completeTask(RenderTask task, boolean uploadSuccess) {
+        task.completion().complete(uploadSuccess);
+
+        long currentRunId = runId.get();
+        if (task.runId() != currentRunId) {
+            return;
+        }
+
+        if (uploadSuccess) {
+            successfulCount.incrementAndGet();
+        }
+
+        inFlightCount.decrementAndGet();
+        completedCount.incrementAndGet();
+
+        Minecraft.getInstance().execute(() -> {
+            if (task.runId() != runId.get()) {
+                return;
+            }
+            notifyProgress(task.itemId());
+            tryFinalizeRun(task.runId());
+        });
+    }
+
+    private void tryFinalizeRun(long expectedRunId) {
+        if (expectedRunId != runId.get()) {
+            return;
+        }
+
+        if (inFlightCount.get() != 0) {
+            return;
+        }
+
+        synchronized (taskQueue) {
+            if (expectedRunId != runId.get()) {
+                return;
+            }
+            if (!taskQueue.isEmpty()) {
+                queueDrained.set(false);
+                return;
+            }
+            if (inFlightCount.get() != 0) {
+                return;
+            }
+
+            isActive.set(false);
+            queueDrained.set(false);
+        }
+
+        notifyComplete();
     }
 
     private void notifyProgress(ResourceLocation current) {
@@ -149,7 +530,7 @@ public class RenderScheduler {
         if (progressListener != null) {
             progressListener.accept(new RenderProgress(completedCount.get(), totalTasks, null));
         }
-        AE2WebMod.LOGGER.info("Render complete: {} items", completedCount.get());
+        AE2WebMod.LOGGER.info("Render complete: saved {}/{} icons", successfulCount.get(), totalTasks);
     }
 
     public int getPendingCount() {
@@ -186,6 +567,12 @@ public class RenderScheduler {
     public void cancel() {
         synchronized (taskQueue) {
             taskQueue.clear();
+            runId.incrementAndGet();
+            completedCount.set(0);
+            successfulCount.set(0);
+            inFlightCount.set(0);
+            totalTasks = 0;
+            queueDrained.set(false);
             isActive.set(false);
             isPaused.set(false);
         }
@@ -197,6 +584,6 @@ public class RenderScheduler {
     }
 
     public void setItemsPerFrame(int itemsPerFrame) {
-        this.itemsPerFrame = Math.max(1, Math.min(20, itemsPerFrame));
+        this.itemsPerFrame = Math.max(1, itemsPerFrame); // No upper limit - prioritize render speed
     }
 }

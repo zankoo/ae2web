@@ -7,20 +7,29 @@ import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.ItemRenderer;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL14;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -98,19 +107,28 @@ public class ItemIconRenderer {
 
         RenderSystem.assertOnRenderThread();
 
+        boolean prevDepthTestEnabled = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+        boolean prevBlendEnabled = GL11.glIsEnabled(GL11.GL_BLEND);
+        int prevDepthFunc = GL11.glGetInteger(GL11.GL_DEPTH_FUNC);
+        int prevBlendSrcRgb = GL11.glGetInteger(GL14.GL_BLEND_SRC_RGB);
+        int prevBlendDstRgb = GL11.glGetInteger(GL14.GL_BLEND_DST_RGB);
+        int prevBlendSrcAlpha = GL11.glGetInteger(GL14.GL_BLEND_SRC_ALPHA);
+        int prevBlendDstAlpha = GL11.glGetInteger(GL14.GL_BLEND_DST_ALPHA);
+
+        boolean projectionBackedUp = false;
+        boolean lightingModified = false;
+        boolean framebufferBound = false;
+
         try {
-            // Bind framebuffer
             frameBuffer.clear(Minecraft.ON_OSX);
             frameBuffer.bindWrite(true);
+            framebufferBound = true;
 
-            // Setup projection
-            Matrix4f projection = new Matrix4f().setOrtho(
-                    0, width, height, 0, -1000, 1000
-            );
+            Matrix4f projection = new Matrix4f().setOrtho(0, width, height, 0, -1000, 1000);
             RenderSystem.backupProjectionMatrix();
+            projectionBackedUp = true;
             RenderSystem.setProjectionMatrix(projection, com.mojang.blaze3d.vertex.VertexSorting.ORTHOGRAPHIC_Z);
 
-            // Setup rendering state
             RenderSystem.enableDepthTest();
             RenderSystem.depthFunc(GL11.GL_LEQUAL);
             RenderSystem.enableBlend();
@@ -121,50 +139,70 @@ public class ItemIconRenderer {
                     GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA
             );
 
-            // Setup lighting for inventory items
             Lighting.setupForFlatItems();
+            lightingModified = true;
 
-            // Render item
             PoseStack poseStack = new PoseStack();
             poseStack.pushPose();
-            poseStack.translate(width / 2.0f, height / 2.0f, 100);
-            poseStack.scale(width * 0.85f, -height * 0.85f, 1);
+            try {
+                poseStack.translate(width / 2.0f, height / 2.0f, 100);
+                poseStack.scale(width * 0.85f, -height * 0.85f, 1);
 
-            Minecraft mc = Minecraft.getInstance();
-            ItemRenderer itemRenderer = mc.getItemRenderer();
-            MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
+                Minecraft mc = Minecraft.getInstance();
+                ItemRenderer itemRenderer = mc.getItemRenderer();
+                MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
 
-            itemRenderer.renderStatic(
-                    stack,
-                    ItemDisplayContext.GUI,
-                    FULL_BRIGHTNESS,
-                    OverlayTexture.NO_OVERLAY,
-                    poseStack,
-                    bufferSource,
-                    mc.level,
-                    0
-            );
+                itemRenderer.renderStatic(
+                        stack,
+                        ItemDisplayContext.GUI,
+                        FULL_BRIGHTNESS,
+                        OverlayTexture.NO_OVERLAY,
+                        poseStack,
+                        bufferSource,
+                        mc.level,
+                        0
+                );
 
-            bufferSource.endBatch();
-            poseStack.popPose();
-
-            // Restore state
-            Lighting.setupFor3DItems();
-            RenderSystem.restoreProjectionMatrix();
-            frameBuffer.unbindWrite();
-
-            // Read pixels using try-with-resources
-            try (NativeImage nativeImage = new NativeImage(width, height, false)) {
-                RenderSystem.bindTexture(frameBuffer.getColorTextureId());
-                nativeImage.downloadTexture(0, false);
-
-                // Process pixels: flip Y and convert to PNG
-                return convertToPng(nativeImage);
+                bufferSource.endBatch();
+            } finally {
+                poseStack.popPose();
             }
-
         } catch (Exception e) {
             AE2WebMod.LOGGER.error("Failed to render item: {}", stack.getItem().getDescriptionId(), e);
-            frameBuffer.unbindWrite();
+            return null;
+        } finally {
+            // Restore GL state before returning to Minecraft rendering.
+            if (prevDepthTestEnabled) {
+                RenderSystem.enableDepthTest();
+            } else {
+                RenderSystem.disableDepthTest();
+            }
+            RenderSystem.depthFunc(prevDepthFunc);
+
+            if (prevBlendEnabled) {
+                RenderSystem.enableBlend();
+            } else {
+                RenderSystem.disableBlend();
+            }
+            GlStateManager._blendFuncSeparate(prevBlendSrcRgb, prevBlendDstRgb, prevBlendSrcAlpha, prevBlendDstAlpha);
+
+            if (lightingModified) {
+                Lighting.setupFor3DItems();
+            }
+            if (projectionBackedUp) {
+                RenderSystem.restoreProjectionMatrix();
+            }
+            if (framebufferBound) {
+                frameBuffer.unbindWrite();
+            }
+        }
+
+        try (NativeImage nativeImage = new NativeImage(width, height, false)) {
+            RenderSystem.bindTexture(frameBuffer.getColorTextureId());
+            nativeImage.downloadTexture(0, false);
+            return convertToPng(nativeImage);
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.error("Failed to read rendered item pixels: {}", stack.getItem().getDescriptionId(), e);
             return null;
         }
     }
@@ -216,5 +254,144 @@ public class ItemIconRenderer {
             return null;
         }
         return new ItemStack(item);
+    }
+
+    /**
+     * Get all registered fluid IDs.
+     */
+    public static List<ResourceLocation> getAllFluidIds() {
+        List<ResourceLocation> fluids = new ArrayList<>();
+        for (ResourceLocation id : ForgeRegistries.FLUIDS.getKeys()) {
+            Fluid fluid = ForgeRegistries.FLUIDS.getValue(id);
+            // Skip empty/air fluids
+            if (fluid != null && fluid != Fluids.EMPTY) {
+                fluids.add(id);
+            }
+        }
+        return fluids;
+    }
+
+    /**
+     * Get FluidStack for a ResourceLocation.
+     */
+    public static @Nullable FluidStack getFluidStack(ResourceLocation fluidId) {
+        var fluid = ForgeRegistries.FLUIDS.getValue(fluidId);
+        if (fluid == null || fluid == Fluids.EMPTY) {
+            return null;
+        }
+        return new FluidStack(fluid, 1000);
+    }
+
+    /**
+     * Render a fluid to PNG bytes.
+     * Must be called on render thread.
+     */
+    public @Nullable byte[] renderFluidToPng(FluidStack fluidStack) {
+        if (!initialized) {
+            initialize();
+        }
+
+        if (fluidStack == null || fluidStack.isEmpty()) {
+            return null;
+        }
+
+        RenderSystem.assertOnRenderThread();
+
+        boolean prevBlendEnabled = GL11.glIsEnabled(GL11.GL_BLEND);
+        int prevBlendSrcRgb = GL11.glGetInteger(GL14.GL_BLEND_SRC_RGB);
+        int prevBlendDstRgb = GL11.glGetInteger(GL14.GL_BLEND_DST_RGB);
+        int prevBlendSrcAlpha = GL11.glGetInteger(GL14.GL_BLEND_SRC_ALPHA);
+        int prevBlendDstAlpha = GL11.glGetInteger(GL14.GL_BLEND_DST_ALPHA);
+
+        // Get fluid texture info before touching framebuffer / projection state.
+        IClientFluidTypeExtensions fluidExtensions = IClientFluidTypeExtensions.of(fluidStack.getFluid());
+        ResourceLocation stillTexture = fluidExtensions.getStillTexture(fluidStack);
+        int tintColor = fluidExtensions.getTintColor(fluidStack);
+        if (stillTexture == null) {
+            return null;
+        }
+
+        boolean projectionBackedUp = false;
+        boolean framebufferBound = false;
+
+        try {
+            frameBuffer.clear(Minecraft.ON_OSX);
+            frameBuffer.bindWrite(true);
+            framebufferBound = true;
+
+            Matrix4f projection = new Matrix4f().setOrtho(0, width, height, 0, -1000, 1000);
+            RenderSystem.backupProjectionMatrix();
+            projectionBackedUp = true;
+            RenderSystem.setProjectionMatrix(projection, VertexSorting.ORTHOGRAPHIC_Z);
+
+            RenderSystem.enableBlend();
+            RenderSystem.blendFuncSeparate(
+                    GlStateManager.SourceFactor.SRC_ALPHA,
+                    GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
+                    GlStateManager.SourceFactor.ONE,
+                    GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA
+            );
+
+            // Get sprite from atlas
+            Minecraft mc = Minecraft.getInstance();
+            TextureAtlasSprite sprite = mc.getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(stillTexture);
+
+            // Extract ARGB components
+            float alpha = ((tintColor >> 24) & 0xFF) / 255.0f;
+            float red = ((tintColor >> 16) & 0xFF) / 255.0f;
+            float green = ((tintColor >> 8) & 0xFF) / 255.0f;
+            float blue = (tintColor & 0xFF) / 255.0f;
+
+            // If alpha is 0, assume fully opaque
+            if (alpha == 0) alpha = 1.0f;
+
+            // Render the fluid texture as a quad
+            RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
+            RenderSystem.setShaderTexture(0, InventoryMenu.BLOCK_ATLAS);
+
+            int padding = (int)(width * 0.075f);
+            int size = width - padding * 2;
+
+            BufferBuilder bufferBuilder = Tesselator.getInstance().getBuilder();
+            bufferBuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
+
+            float u0 = sprite.getU0();
+            float u1 = sprite.getU1();
+            float v0 = sprite.getV0();
+            float v1 = sprite.getV1();
+
+            bufferBuilder.vertex(padding, padding + size, 0).uv(u0, v1).color(red, green, blue, alpha).endVertex();
+            bufferBuilder.vertex(padding + size, padding + size, 0).uv(u1, v1).color(red, green, blue, alpha).endVertex();
+            bufferBuilder.vertex(padding + size, padding, 0).uv(u1, v0).color(red, green, blue, alpha).endVertex();
+            bufferBuilder.vertex(padding, padding, 0).uv(u0, v0).color(red, green, blue, alpha).endVertex();
+
+            BufferUploader.drawWithShader(bufferBuilder.end());
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.error("Failed to render fluid: {}", fluidStack.getFluid().getFluidType().getDescriptionId(), e);
+            return null;
+        } finally {
+            if (prevBlendEnabled) {
+                RenderSystem.enableBlend();
+            } else {
+                RenderSystem.disableBlend();
+            }
+            GlStateManager._blendFuncSeparate(prevBlendSrcRgb, prevBlendDstRgb, prevBlendSrcAlpha, prevBlendDstAlpha);
+
+            if (projectionBackedUp) {
+                RenderSystem.restoreProjectionMatrix();
+            }
+            if (framebufferBound) {
+                frameBuffer.unbindWrite();
+            }
+        }
+
+        try (NativeImage nativeImage = new NativeImage(width, height, false)) {
+            RenderSystem.bindTexture(frameBuffer.getColorTextureId());
+            nativeImage.downloadTexture(0, false);
+            return convertToPng(nativeImage);
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.error("Failed to read rendered fluid pixels: {}", fluidStack.getFluid().getFluidType().getDescriptionId(), e);
+            return null;
+        }
     }
 }

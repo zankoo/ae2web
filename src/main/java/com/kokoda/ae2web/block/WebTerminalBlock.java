@@ -12,6 +12,8 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -22,6 +24,8 @@ import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.network.NetworkHooks;
 import org.jetbrains.annotations.Nullable;
 
 public class WebTerminalBlock extends Block implements EntityBlock {
@@ -35,6 +39,11 @@ public class WebTerminalBlock extends Block implements EntityBlock {
 
     private static void sendTerminalStatus(Player player, WebTerminalBlockEntity terminal) {
         player.sendSystemMessage(Component.literal("[AE2 Web Terminal]").withStyle(ChatFormatting.GOLD));
+
+        // Show display name
+        String displayName = terminal.getDisplayNameString();
+        player.sendSystemMessage(Component.literal("Name: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(displayName).withStyle(ChatFormatting.WHITE)));
 
         boolean connected = terminal.isConnectedToGrid();
         ChatFormatting statusColor = connected ? ChatFormatting.GREEN : ChatFormatting.RED;
@@ -83,10 +92,21 @@ public class WebTerminalBlock extends Block implements EntityBlock {
             return InteractionResult.sidedSuccess(false);
         }
 
-        // Shift+right-click with wrench to pick up (like AE2 blocks)
         ItemStack heldItem = player.getItemInHand(hand);
+
+        // Shift+right-click with wrench to pick up (like AE2 blocks)
         if (player.isShiftKeyDown() && heldItem.is(WRENCH_TAG)) {
             ItemStack drop = new ItemStack(this);
+
+            CompoundTag beTag = new CompoundTag();
+            beTag.putString("terminalId", terminal.getTerminalId());
+            beTag.putString("customName", terminal.getCustomName());
+            BlockItem.setBlockEntityData(drop, ModBlockEntities.WEB_TERMINAL.get(), beTag);
+
+            if (terminal.getCustomName() != null && !terminal.getCustomName().isBlank()) {
+                drop.setHoverName(Component.literal(terminal.getCustomName()));
+            }
+
             if (!player.getInventory().add(drop)) {
                 player.drop(drop, false);
             }
@@ -94,6 +114,18 @@ public class WebTerminalBlock extends Block implements EntityBlock {
             return InteractionResult.sidedSuccess(false);
         }
 
+        // Shift+right-click (no wrench) to open rename GUI
+        if (player.isShiftKeyDown()) {
+            if (player instanceof ServerPlayer serverPlayer) {
+                NetworkHooks.openScreen(serverPlayer, terminal, buf -> {
+                    buf.writeBlockPos(pos);
+                    buf.writeUtf(terminal.getCustomName(), 256);
+                });
+            }
+            return InteractionResult.sidedSuccess(false);
+        }
+
+        // Normal right-click = show status
         sendTerminalStatus(player, terminal);
         return InteractionResult.sidedSuccess(false);
     }

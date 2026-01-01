@@ -4,6 +4,9 @@ import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.client.PrerenderTrigger;
 import com.kokoda.ae2web.client.command.RenderCommand;
 import com.kokoda.ae2web.client.render.RenderScheduler;
+import com.kokoda.ae2web.client.screen.RenameTerminalScreen;
+import com.kokoda.ae2web.registry.ModMenus;
+import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -12,6 +15,11 @@ import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 public class ClientSetup {
     public static void onClientSetup(final FMLClientSetupEvent event) {
+        // Register menu screens
+        event.enqueueWork(() -> {
+            MenuScreens.register(ModMenus.RENAME_TERMINAL.get(), RenameTerminalScreen::new);
+        });
+
         // Register client-side event handlers
         MinecraftForge.EVENT_BUS.register(PrerenderTrigger.class);
         MinecraftForge.EVENT_BUS.register(ClientTickHandler.class);

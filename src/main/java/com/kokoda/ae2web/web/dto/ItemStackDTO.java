@@ -1,29 +1,42 @@
 package com.kokoda.ae2web.web.dto;
 
 import appeng.api.stacks.AEItemKey;
+import com.kokoda.ae2web.util.IconKeyUtils;
 import net.minecraft.resources.ResourceLocation;
 
 public class ItemStackDTO {
+    private final String type = "item";
     private final String id;
+    private final String uniqueId;
+    private final String iconKey;  // For NBT-aware icon requests
     private final String name;
     private final String translationKey;
     private final long amount;
     private final String namespace;
+    private final boolean craftable;
 
-    private final String materialColor;
-
-    public ItemStackDTO(AEItemKey key, long amount, String name, String translationKey, String materialColor) {
+    public ItemStackDTO(AEItemKey key, long amount, String name, String translationKey, boolean craftable) {
         ResourceLocation itemId = key.getId();
         this.id = itemId.toString();
+        this.iconKey = IconKeyUtils.iconKey(key);
+        this.uniqueId = "item:" + this.iconKey;
         this.namespace = itemId.getNamespace();
         this.name = name;
         this.translationKey = translationKey;
         this.amount = amount;
-        this.materialColor = materialColor;
+        this.craftable = craftable;
     }
 
     public String getId() {
         return id;
+    }
+
+    public String getUniqueId() {
+        return uniqueId;
+    }
+
+    public String getIconKey() {
+        return iconKey;
     }
 
     public String getName() {
@@ -42,7 +55,11 @@ public class ItemStackDTO {
         return namespace;
     }
 
-    public String getMaterialColor() {
-        return materialColor;
+    public String getType() {
+        return type;
+    }
+
+    public boolean isCraftable() {
+        return craftable;
     }
 }

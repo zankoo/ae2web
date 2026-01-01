@@ -4,10 +4,14 @@ import com.kokoda.ae2web.registry.ModBlockEntities;
 import com.kokoda.ae2web.registry.ModBlocks;
 import com.kokoda.ae2web.registry.ModCreativeTabs;
 import com.kokoda.ae2web.registry.ModItems;
+import com.kokoda.ae2web.registry.ModMenus;
 import com.kokoda.ae2web.setup.ClientSetup;
 import com.kokoda.ae2web.setup.CommonSetup;
 import com.kokoda.ae2web.config.AE2WebConfig;
+import com.kokoda.ae2web.network.PacketHandler;
 import com.kokoda.ae2web.web.WebServer;
+import com.kokoda.ae2web.web.handlers.CraftingHandler;
+import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
@@ -34,6 +38,7 @@ public class AE2WebMod {
         ModItems.register(modEventBus);
         ModBlockEntities.register(modEventBus);
         ModCreativeTabs.register(modEventBus);
+        ModMenus.register(modEventBus);
         AE2WebConfig.register();
 
         // Register setup methods
@@ -47,6 +52,9 @@ public class AE2WebMod {
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
+        event.enqueueWork(() -> {
+            PacketHandler.init();
+        });
         CommonSetup.init(event);
     }
 
@@ -54,11 +62,13 @@ public class AE2WebMod {
     public void onServerStarting(ServerStartingEvent event) {
         LOGGER.info("Starting AE2 Web Terminal HTTP server...");
         WebServer.getInstance().start();
+        PrerenderStorageService.getInstance().initialize();
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         LOGGER.info("Stopping AE2 Web Terminal HTTP server...");
+        CraftingHandler.shutdownExecutor();
         WebServer.getInstance().stop();
     }
 }

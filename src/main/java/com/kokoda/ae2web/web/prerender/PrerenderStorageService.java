@@ -1,12 +1,24 @@
 package com.kokoda.ae2web.web.prerender;
 
+import appeng.api.stacks.AEFluidKey;
+import appeng.api.stacks.AEItemKey;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
+import com.google.gson.reflect.TypeToken;
 import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.config.AE2WebConfig;
+import com.kokoda.ae2web.util.IconKeyUtils;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,28 +26,42 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Manages storage and retrieval of pre-rendered item icons.
+ * Manages storage and retrieval of pre-rendered item icons and translations.
  * Storage location: config/ae2web/prerender/{namespace}/{path}.png
+ * Translations stored in: config/ae2web/prerender/translations.json
+ * Tooltips stored in: config/ae2web/prerender/tooltips.json
  */
 public class PrerenderStorageService {
     private static final PrerenderStorageService INSTANCE = new PrerenderStorageService();
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private static final long LOCK_TTL_MS = 60000; // 1 minute
 
     private final Path storageRoot;
+    private final Path translationsFile;
+    private final Path tooltipsFile;
     private final Map<String, byte[]> iconCache;
     private final Object cacheLock = new Object();
+    private final Object initLock = new Object();
     private final Set<String> existenceCache;
-    private final Map<String, Long> renderingLocks;
+    private final Map<String, LockInfo> renderingLocks;
+
+    private record LockInfo(String clientId, long expireTime) {}
+    private final Map<String, String> translations; // itemId -> translated name
+    private final Map<String, List<String>> tooltips; // iconKey -> tooltip lines (plain text, may include literal '§')
     private volatile boolean initialized = false;
 
     private PrerenderStorageService() {
         this.storageRoot = Paths.get("config", "ae2web", "prerender");
+        this.translationsFile = storageRoot.resolve("translations.json");
+        this.tooltipsFile = storageRoot.resolve("tooltips.json");
         // Use LinkedHashMap with accessOrder=true for LRU eviction
         // All access must be synchronized via cacheLock
         this.iconCache = new LinkedHashMap<>(128, 0.75f, true);
         this.existenceCache = ConcurrentHashMap.newKeySet();
         this.renderingLocks = new ConcurrentHashMap<>();
+        this.translations = new ConcurrentHashMap<>();
+        this.tooltips = new ConcurrentHashMap<>();
     }
 
     public static PrerenderStorageService getInstance() {
@@ -46,15 +72,77 @@ public class PrerenderStorageService {
      * Initialize the storage directory.
      */
     public void initialize() {
-        if (initialized) return;
+        if (initialized) {
+            return;
+        }
 
-        try {
-            Files.createDirectories(storageRoot);
-            scanExistingIcons();
-            initialized = true;
-            AE2WebMod.LOGGER.info("PrerenderStorageService initialized at {}", storageRoot.toAbsolutePath());
+        synchronized (initLock) {
+            if (initialized) {
+                return;
+            }
+
+            try {
+                Files.createDirectories(storageRoot);
+                scanExistingIcons();
+                loadTranslations();
+                loadTooltips();
+                initialized = true;
+                AE2WebMod.LOGGER.info("PrerenderStorageService initialized at {}", storageRoot.toAbsolutePath());
+            } catch (IOException e) {
+                AE2WebMod.LOGGER.error("Failed to initialize prerender storage", e);
+            }
+        }
+    }
+
+    /**
+     * Load translations from JSON file.
+     */
+    private void loadTranslations() {
+        if (!Files.exists(translationsFile)) return;
+
+        try (Reader reader = Files.newBufferedReader(translationsFile, StandardCharsets.UTF_8)) {
+            Type type = new TypeToken<Map<String, String>>() {}.getType();
+            Map<String, String> loaded = GSON.fromJson(reader, type);
+            if (loaded != null) {
+                translations.putAll(loaded);
+                AE2WebMod.LOGGER.debug("Loaded {} translations", translations.size());
+            }
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.warn("Failed to load translations", e);
+        }
+    }
+
+    /**
+     * Save translations to JSON file.
+     */
+    private void saveTranslations() {
+        try (Writer writer = Files.newBufferedWriter(translationsFile, StandardCharsets.UTF_8)) {
+            GSON.toJson(translations, writer);
         } catch (IOException e) {
-            AE2WebMod.LOGGER.error("Failed to initialize prerender storage", e);
+            AE2WebMod.LOGGER.warn("Failed to save translations", e);
+        }
+    }
+
+    private void loadTooltips() {
+        if (!Files.exists(tooltipsFile)) return;
+
+        try (Reader reader = Files.newBufferedReader(tooltipsFile, StandardCharsets.UTF_8)) {
+            Type type = new TypeToken<Map<String, List<String>>>() {}.getType();
+            Map<String, List<String>> loaded = GSON.fromJson(reader, type);
+            if (loaded != null) {
+                tooltips.putAll(loaded);
+                AE2WebMod.LOGGER.debug("Loaded {} tooltips", tooltips.size());
+            }
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.warn("Failed to load tooltips", e);
+        }
+    }
+
+    private void saveTooltips() {
+        try (Writer writer = Files.newBufferedWriter(tooltipsFile, StandardCharsets.UTF_8)) {
+            GSON.toJson(tooltips, writer);
+        } catch (IOException e) {
+            AE2WebMod.LOGGER.warn("Failed to save tooltips", e);
         }
     }
 
@@ -69,13 +157,19 @@ public class PrerenderStorageService {
         try (Stream<Path> namespaces = Files.list(storageRoot)) {
             namespaces.filter(Files::isDirectory).forEach(nsDir -> {
                 String namespace = nsDir.getFileName().toString();
-                try (Stream<Path> files = Files.list(nsDir)) {
-                    files.filter(f -> f.toString().endsWith(".png"))
-                         .forEach(f -> {
-                             String path = f.getFileName().toString();
-                             path = path.substring(0, path.length() - 4); // Remove .png
-                             existenceCache.add(namespace + ":" + path);
-                         });
+                try (Stream<Path> files = Files.walk(nsDir)) {
+                    files
+                            .filter(Files::isRegularFile)
+                            .filter(f -> f.toString().endsWith(".png"))
+                            .forEach(f -> {
+                                Path relative = nsDir.relativize(f);
+                                String rel = relative.toString().replace('\\', '/');
+                                if (!rel.endsWith(".png")) {
+                                    return;
+                                }
+                                rel = rel.substring(0, rel.length() - 4); // Remove .png
+                                existenceCache.add(namespace + ":" + rel);
+                            });
                 } catch (IOException e) {
                     AE2WebMod.LOGGER.warn("Failed to scan namespace directory: {}", nsDir, e);
                 }
@@ -164,9 +258,9 @@ public class PrerenderStorageService {
     }
 
     /**
-     * Save a pre-rendered icon.
+     * Save a pre-rendered icon with optional translated name + tooltip lines.
      */
-    public boolean saveIcon(String itemId, byte[] pngData) {
+    public boolean saveIcon(String iconKey, byte[] pngData, @Nullable String translatedName, @Nullable List<String> tooltipLines) {
         if (pngData == null || pngData.length == 0) {
             return false;
         }
@@ -177,17 +271,17 @@ public class PrerenderStorageService {
             pngData[1] != 0x50 ||
             pngData[2] != 0x4E ||
             pngData[3] != 0x47) {
-            AE2WebMod.LOGGER.warn("Invalid PNG data for item: {}", itemId);
+            AE2WebMod.LOGGER.warn("Invalid PNG data for item: {}", iconKey);
             return false;
         }
 
         // Check size limit
         if (pngData.length > AE2WebConfig.getPrerenderMaxUploadSize()) {
-            AE2WebMod.LOGGER.warn("PNG data too large for item: {} ({} bytes)", itemId, pngData.length);
+            AE2WebMod.LOGGER.warn("PNG data too large for item: {} ({} bytes)", iconKey, pngData.length);
             return false;
         }
 
-        Path filePath = getFilePath(itemId);
+        Path filePath = getFilePath(iconKey);
         if (filePath == null) {
             return false;
         }
@@ -197,27 +291,78 @@ public class PrerenderStorageService {
             Files.write(filePath, pngData, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
 
             // Update caches
-            existenceCache.add(itemId);
+            existenceCache.add(iconKey);
             synchronized (cacheLock) {
-                iconCache.put(itemId, pngData);
+                iconCache.put(iconKey, pngData);
                 evictIfNeeded();
             }
 
-            // Release any lock
-            renderingLocks.remove(itemId);
+            // Store translation if provided
+            if (translatedName != null && !translatedName.isBlank()) {
+                translations.put(iconKey, translatedName);
+                saveTranslations();
+            }
 
-            AE2WebMod.LOGGER.debug("Saved prerendered icon: {}", itemId);
+            if (tooltipLines != null && !tooltipLines.isEmpty()) {
+                tooltips.put(iconKey, tooltipLines);
+                saveTooltips();
+            }
+
+            // Release any lock
+            renderingLocks.remove(iconKey);
+
+            AE2WebMod.LOGGER.debug("Saved prerendered icon: {}", iconKey);
             return true;
         } catch (IOException e) {
-            AE2WebMod.LOGGER.error("Failed to save prerendered icon: {}", itemId, e);
+            AE2WebMod.LOGGER.error("Failed to save prerendered icon: {}", iconKey, e);
             return false;
         }
     }
 
     /**
-     * Get the file path for an item ID.
+     * Get the translated name for an item.
      */
-    private @Nullable Path getFilePath(String itemId) {
+    public @Nullable String getTranslation(String itemId) {
+        return translations.get(itemId);
+    }
+
+    public @Nullable List<String> getTooltip(String iconKey) {
+        return tooltips.get(iconKey);
+    }
+
+    /**
+     * Check if translation exists for an item.
+     */
+    public boolean hasTranslation(String itemId) {
+        return translations.containsKey(itemId);
+    }
+
+    public boolean hasTooltip(String iconKey) {
+        return tooltips.containsKey(iconKey);
+    }
+
+    /**
+     * Get the file path for an item/fluid ID with optional NBT hash.
+     * Format: {@code namespace:path@nbtHash}.
+     *
+     * @param iconKey Icon key in format "namespace:path@nbtHash"
+     * @return Path to the PNG file, or null if invalid
+     */
+    private @Nullable Path getFilePath(String iconKey) {
+        if (iconKey == null || iconKey.isEmpty()) {
+            return null;
+        }
+
+        // Parse iconKey format: "namespace:path@nbtHash"
+        int atIndex = iconKey.lastIndexOf('@');
+        if (atIndex <= 0 || atIndex >= iconKey.length() - 1) {
+            return null;
+        }
+
+        String itemId = iconKey.substring(0, atIndex);
+        String nbtHash = iconKey.substring(atIndex + 1);
+
+        // Parse itemId: "namespace:path"
         int colonIdx = itemId.indexOf(':');
         if (colonIdx <= 0 || colonIdx >= itemId.length() - 1) {
             return null;
@@ -226,22 +371,25 @@ public class PrerenderStorageService {
         String namespace = itemId.substring(0, colonIdx);
         String path = itemId.substring(colonIdx + 1);
 
-        // Sanitize path components
+        // Sanitize all components
         namespace = sanitizePath(namespace);
-        path = sanitizePath(path);
+        path = sanitizePathWithSlashes(path);
+        nbtHash = sanitizePath(nbtHash);
 
-        if (namespace == null || path == null) {
+        if (namespace == null || path == null || nbtHash == null) {
             return null;
         }
 
-        Path filePath = storageRoot.resolve(namespace).resolve(path + ".png");
+        // Construct file path: {namespace}/{path}@{nbtHash}.png
+        String filename = path + "@" + nbtHash + ".png";
+        Path filePath = storageRoot.resolve(namespace).resolve(filename);
 
         // Security check: ensure resolved path is under storageRoot
         try {
             Path normalizedPath = filePath.toAbsolutePath().normalize();
             Path normalizedRoot = storageRoot.toAbsolutePath().normalize();
             if (!normalizedPath.startsWith(normalizedRoot)) {
-                AE2WebMod.LOGGER.warn("Path traversal attempt detected: {}", itemId);
+                AE2WebMod.LOGGER.warn("Path traversal attempt detected: {}", iconKey);
                 return null;
             }
         } catch (Exception e) {
@@ -277,21 +425,87 @@ public class PrerenderStorageService {
     }
 
     /**
-     * Get a list of item IDs that don't have pre-rendered icons.
+     * Sanitize a ResourceLocation path that may contain '/' (e.g. "foo/bar_baz").
+     * Returns null if the path is invalid.
+     */
+    private @Nullable String sanitizePathWithSlashes(String component) {
+        if (component == null || component.isEmpty()) {
+            return null;
+        }
+        if (component.contains("..") || component.contains("\\")) {
+            return null;
+        }
+
+        String[] parts = component.split("/");
+        if (parts.length == 0) {
+            return null;
+        }
+
+        StringBuilder out = new StringBuilder(component.length());
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i];
+            if (part == null || part.isEmpty()) {
+                return null;
+            }
+
+            // Sanitize each segment but keep directory structure.
+            String sanitized = part.replaceAll("[^a-zA-Z0-9_.-]", "_");
+            if (sanitized.isEmpty() || sanitized.startsWith(".")) {
+                return null;
+            }
+
+            if (i > 0) {
+                out.append('/');
+            }
+            out.append(sanitized);
+        }
+
+        return out.toString();
+    }
+
+    /**
+     * Get a list of item/fluid IDs that don't have pre-rendered icons.
      */
     public List<String> getMissingIcons(@Nullable String namespace, int limit) {
         List<String> missing = new ArrayList<>();
 
+        // Check items
         for (ResourceLocation itemId : ForgeRegistries.ITEMS.getKeys()) {
             if (namespace != null && !itemId.getNamespace().equals(namespace)) {
                 continue;
             }
 
-            String id = itemId.toString();
-            if (!existenceCache.contains(id)) {
-                missing.add(id);
+            var item = ForgeRegistries.ITEMS.getValue(itemId);
+            if (item == null) {
+                continue;
+            }
+
+            String iconKey = IconKeyUtils.iconKey(AEItemKey.of(item));
+            if (!existenceCache.contains(iconKey)) {
+                missing.add(iconKey);
                 if (missing.size() >= limit) {
-                    break;
+                    return missing;
+                }
+            }
+        }
+
+        // Check fluids
+        for (ResourceLocation fluidId : ForgeRegistries.FLUIDS.getKeys()) {
+            if (namespace != null && !fluidId.getNamespace().equals(namespace)) {
+                continue;
+            }
+
+            // Skip empty fluid
+            var fluid = ForgeRegistries.FLUIDS.getValue(fluidId);
+            if (fluid == null || fluid == Fluids.EMPTY) {
+                continue;
+            }
+
+            String iconKey = IconKeyUtils.iconKey(AEFluidKey.of(fluid));
+            if (!existenceCache.contains(iconKey)) {
+                missing.add(iconKey);
+                if (missing.size() >= limit) {
+                    return missing;
                 }
             }
         }
@@ -304,16 +518,33 @@ public class PrerenderStorageService {
      */
     public Map<String, Integer> getStats() {
         int totalItems = ForgeRegistries.ITEMS.getKeys().size();
+
+        // Count fluids (excluding EMPTY)
+        int totalFluids = 0;
+        for (ResourceLocation fluidId : ForgeRegistries.FLUIDS.getKeys()) {
+            var fluid = ForgeRegistries.FLUIDS.getValue(fluidId);
+            if (fluid != null && fluid != Fluids.EMPTY) {
+                totalFluids++;
+            }
+        }
+
+        int totalAll = totalItems + totalFluids;
         int renderedCount = existenceCache.size();
         int cacheSize;
         synchronized (cacheLock) {
             cacheSize = iconCache.size();
         }
 
+        // Ensure missingCount is never negative (can happen if existenceCache has stale entries)
+        int missingCount = Math.max(0, totalAll - renderedCount);
+
         Map<String, Integer> stats = new LinkedHashMap<>();
-        stats.put("totalItems", totalItems);
+        stats.put("totalItems", totalAll);
+        stats.put("itemCount", totalItems);
+        stats.put("fluidCount", totalFluids);
         stats.put("renderedCount", renderedCount);
-        stats.put("missingCount", totalItems - renderedCount);
+        stats.put("missingCount", missingCount);
+        stats.put("translationCount", translations.size());
         stats.put("cacheSize", cacheSize);
         stats.put("activeLocks", renderingLocks.size());
 
@@ -323,24 +554,52 @@ public class PrerenderStorageService {
     /**
      * Claim items for rendering (concurrency control).
      * Returns the subset of items that this client should render.
+     * Uses atomic compute() to prevent race conditions.
      */
-    public List<String> claimItemsForRendering(List<String> requestedIds, String clientId) {
+    public ClaimResult claimItemsForRendering(List<String> requestedIds, String clientId) {
         long now = System.currentTimeMillis();
         List<String> claimed = new ArrayList<>();
+        int alreadyRendered = 0;
+        int lockedBySelf = 0;
+        int lockedByOthers = 0;
 
-        // Clean expired locks
-        renderingLocks.entrySet().removeIf(e -> e.getValue() < now);
+        // Clean expired locks periodically (not on every call for performance)
+        cleanExpiredLocksIfNeeded(now);
 
         for (String id : requestedIds) {
             // Skip if already rendered
             if (existenceCache.contains(id)) {
+                alreadyRendered++;
                 continue;
             }
 
-            // Try to acquire lock
-            Long existing = renderingLocks.putIfAbsent(id, now + LOCK_TTL_MS);
-            if (existing == null) {
-                claimed.add(id);
+            // Atomic claim using compute() to prevent race conditions
+            final int[] result = {0}; // 0=claimed, 1=lockedBySelf, 2=lockedByOthers
+            final long lockNow = now;
+
+            renderingLocks.compute(id, (key, existing) -> {
+                // Check if lock exists and is not expired
+                if (existing != null && existing.expireTime() >= lockNow) {
+                    if (existing.clientId().equals(clientId)) {
+                        // Already locked by this client - extend lock
+                        result[0] = 1; // lockedBySelf
+                        return new LockInfo(clientId, lockNow + LOCK_TTL_MS);
+                    } else {
+                        // Locked by another client
+                        result[0] = 2; // lockedByOthers
+                        return existing; // keep existing lock
+                    }
+                } else {
+                    // No lock or expired - acquire new lock
+                    result[0] = 0; // claimed
+                    return new LockInfo(clientId, lockNow + LOCK_TTL_MS);
+                }
+            });
+
+            switch (result[0]) {
+                case 0 -> claimed.add(id);
+                case 1 -> { claimed.add(id); lockedBySelf++; }
+                case 2 -> lockedByOthers++;
             }
         }
 
@@ -348,11 +607,30 @@ public class PrerenderStorageService {
             AE2WebMod.LOGGER.debug("Client {} claimed {} items for rendering", clientId, claimed.size());
         }
 
-        return claimed;
+        return new ClaimResult(claimed, alreadyRendered, lockedBySelf, lockedByOthers);
+    }
+
+    private static final long LOCK_CLEANUP_INTERVAL_MS = 30000; // 30 seconds
+    private volatile long lastLockCleanup = 0;
+
+    /**
+     * Clean expired locks periodically to prevent unbounded growth.
+     */
+    private void cleanExpiredLocksIfNeeded(long now) {
+        if (now - lastLockCleanup > LOCK_CLEANUP_INTERVAL_MS) {
+            lastLockCleanup = now;
+            renderingLocks.entrySet().removeIf(e -> e.getValue().expireTime() < now);
+        }
+    }
+
+    public record ClaimResult(List<String> claimed, int alreadyRendered, int lockedBySelf, int lockedByOthers) {
+        public boolean hasLockedByOthers() {
+            return lockedByOthers > 0;
+        }
     }
 
     /**
-     * Clear all pre-rendered icons.
+     * Clear all pre-rendered icons and translations.
      */
     public void clearAll() {
         synchronized (cacheLock) {
@@ -361,6 +639,7 @@ public class PrerenderStorageService {
 
         existenceCache.clear();
         renderingLocks.clear();
+        translations.clear();
 
         try {
             if (Files.exists(storageRoot)) {
@@ -376,7 +655,7 @@ public class PrerenderStorageService {
                 }
             }
             Files.createDirectories(storageRoot);
-            AE2WebMod.LOGGER.info("Cleared all prerendered icons");
+            AE2WebMod.LOGGER.info("Cleared all prerendered icons and translations");
         } catch (IOException e) {
             AE2WebMod.LOGGER.error("Failed to clear prerender storage", e);
         }
