@@ -6,13 +6,17 @@ export async function apiRequest(endpoint, options = {}) {
         headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-        ...options,
-        headers
-    });
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+    try {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            headers
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return await response.json();
+    } catch (e) {
+        console.warn(`API request to ${endpoint} failed.`, e);
+        throw e;
     }
-    return await response.json();
 }
-

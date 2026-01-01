@@ -1,7 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
-  <rect x="1" y="1" width="34" height="34" rx="6" fill="#0d1117" stroke="#3d4654" stroke-width="2"/>
-  <path d="M10 12h16v12H10z" fill="none" stroke="#00d4aa" stroke-width="2"/>
-  <path d="M13 16h10M13 20h10M13 24h6" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="26" cy="10" r="2" fill="#a855f7"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- Device Body -->
+  <rect x="6" y="4" width="20" height="24" rx="2" fill="#8B8B8B" stroke="#404040" stroke-width="2"/>
+  
+  <!-- Screen -->
+  <rect x="9" y="8" width="14" height="10" fill="#3B2754"/>
+  <rect x="11" y="10" width="10" height="2" fill="#00FFFF" opacity="0.8"/>
+  <rect x="11" y="13" width="7" height="2" fill="#00FFFF" opacity="0.6"/>
+  
+  <!-- Controls -->
+  <rect x="9" y="21" width="14" height="4" fill="#5E5E5E"/>
+  <rect x="10" y="22" width="2" height="2" fill="#109E59"/>
+  <rect x="14" y="22" width="4" height="2" fill="#C6CBE1"/>
+  <rect x="20" y="22" width="2" height="2" fill="#B91010"/>
+  
+  <!-- Antenna -->
+  <rect x="24" y="2" width="2" height="6" fill="#404040"/>
+  <circle cx="25" cy="2" r="2" fill="#A85CF8"/>
 </svg>
-
