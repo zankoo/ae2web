@@ -13,6 +13,11 @@ It exposes the ME network inventory + crafting controls via an embedded Netty HT
 - This project is not released yet; backward compatibility is NOT required.
 - Behavior changes and breaking changes (API/config/UI) are OK; do not add compatibility layers unless explicitly requested.
 
+## Java Coding Standard (Required)
+
+- Follow Alibaba Java Development Manual (P3C, 黄山版) strictly for all Java code in this repo:
+  `https://github.com/alibaba/p3c/blob/master/Java%E5%BC%80%E5%8F%91%E6%89%8B%E5%86%8C(%E9%BB%84%E5%B1%B1%E7%89%88).pdf`
+
 ## Build Commands
 
 ```bash

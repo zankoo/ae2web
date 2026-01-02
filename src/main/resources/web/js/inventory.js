@@ -240,9 +240,14 @@ function syncInventory(data) {
         grid.innerHTML = '';
     }
 
-    const totalCount = Number.isFinite(data?.total) ? data.total : inventoryItems.length;
-    document.getElementById('total-items').innerText = formatNumber(totalCount);
-    document.getElementById('item-types').innerText = totalCount;
+    const typeCount = Number.isFinite(data?.total) ? data.total : inventoryItems.length;
+    const totalItems = inventoryItems.reduce((sum, item) => {
+        const amount = item?.amount;
+        return sum + (Number.isFinite(amount) ? amount : 0);
+    }, 0);
+
+    document.getElementById('total-items').innerText = formatNumber(totalItems);
+    document.getElementById('item-types').innerText = formatNumber(typeCount);
 
     ensureIconObserver();
 
