@@ -5,6 +5,7 @@ import { openCraftModal } from './craft.js';
 import { createTooltipPositioner } from './tooltipPositioner.js';
 import { sortInventoryItems } from './inventorySort.js';
 import { nextIconRetry } from './iconRetry.js';
+import { computeFlipDelta } from './flipAnimation.js';
 
 let iconObserver = null;
 const loadedIcons = new Set();
@@ -12,6 +13,11 @@ const ICON_RETRY_BASE_MS = 1500;
 const ICON_RETRY_MAX_MS = 30000;
 const ICON_RETRY_MAX_ATTEMPTS = 6;
 const iconRetryTimers = new WeakMap();
+
+const REORDER_ANIMATION_MS = 180;
+const REORDER_ANIMATION_EASING = 'cubic-bezier(0.2, 0, 0, 1)';
+const REORDER_ANIMATION_OVERSCAN_ROWS = 2;
+const reorderAnimations = new WeakMap();
 
 let inventoryItems = [];
 const inventorySlotById = new Map();
@@ -249,6 +255,7 @@ function syncInventory(data) {
         return;
     }
 
+    const reorderSnapshot = state.currentSort === 'amount' ? captureReorderSnapshot(scrollEl, grid) : null;
     inventoryItems = sortInventoryItems(items, state.currentSort);
 
     if (inventorySlotById.size === 0) {
@@ -304,6 +311,140 @@ function syncInventory(data) {
 
     observeLazyIcons(grid);
     restoreScrollAnchor(scrollEl, grid, anchor);
+    animateReorderSnapshot(reorderSnapshot);
+}
+
+function prefersReducedMotion() {
+    try {
+        return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+        return false;
+    }
+}
+
+function captureReorderSnapshot(scrollEl, grid) {
+    if (prefersReducedMotion()) {
+        return null;
+    }
+    if (typeof HTMLElement === 'undefined') {
+        return null;
+    }
+
+    const elements = getVisibleSlotsForReorder(scrollEl, grid);
+    if (elements.length === 0) {
+        return null;
+    }
+
+    for (const el of elements) {
+        const anim = reorderAnimations.get(el);
+        if (anim) {
+            try {
+                anim.cancel();
+            } catch {
+            }
+            reorderAnimations.delete(el);
+        }
+    }
+
+    const rects = new Map();
+    for (const el of elements) {
+        const rect = el.getBoundingClientRect();
+        rects.set(el, { left: rect.left, top: rect.top });
+    }
+
+    return { elements, rects };
+}
+
+function getVisibleSlotsForReorder(scrollEl, grid) {
+    const children = grid.children;
+    const count = children.length;
+    if (count === 0) {
+        return [];
+    }
+
+    const first = children[0];
+    if (!(first instanceof HTMLElement)) {
+        return [];
+    }
+
+    const firstRect = first.getBoundingClientRect();
+    const cellWidth = firstRect.width;
+    const cellHeight = firstRect.height;
+    if (!Number.isFinite(cellWidth) || !Number.isFinite(cellHeight) || cellWidth <= 0 || cellHeight <= 0) {
+        return [];
+    }
+
+    const gap = parseFloat(getComputedStyle(grid).gap) || 0;
+    const columns = Math.max(1, Math.floor((grid.clientWidth + gap) / (cellWidth + gap)));
+    const rowHeight = cellHeight + gap;
+
+    const startRow = Math.max(0, Math.floor(scrollEl.scrollTop / rowHeight) - REORDER_ANIMATION_OVERSCAN_ROWS);
+    const endRow = Math.ceil((scrollEl.scrollTop + scrollEl.clientHeight) / rowHeight) + REORDER_ANIMATION_OVERSCAN_ROWS;
+    const startIndex = startRow * columns;
+    const endIndex = Math.min(count, (endRow + 1) * columns);
+
+    const out = [];
+    for (let i = startIndex; i < endIndex; i++) {
+        const el = children[i];
+        if (el instanceof HTMLElement) {
+            out.push(el);
+        }
+    }
+    return out;
+}
+
+function animateReorderSnapshot(snapshot) {
+    if (!snapshot?.elements || !snapshot?.rects) {
+        return;
+    }
+
+    for (const el of snapshot.elements) {
+        if (!el?.isConnected) {
+            continue;
+        }
+        if (typeof el.animate !== 'function') {
+            continue;
+        }
+
+        const oldRect = snapshot.rects.get(el);
+        if (!oldRect) {
+            continue;
+        }
+
+        const rect = el.getBoundingClientRect();
+        const delta = computeFlipDelta(oldRect, rect);
+        if (Math.abs(delta.dx) < 0.5 && Math.abs(delta.dy) < 0.5) {
+            continue;
+        }
+
+        const prev = reorderAnimations.get(el);
+        if (prev) {
+            try {
+                prev.cancel();
+            } catch {
+            }
+            reorderAnimations.delete(el);
+        }
+
+        el.style.willChange = 'transform';
+        const anim = el.animate(
+            [
+                { transform: `translate3d(${delta.dx}px, ${delta.dy}px, 0)` },
+                { transform: 'translate3d(0, 0, 0)' },
+            ],
+            { duration: REORDER_ANIMATION_MS, easing: REORDER_ANIMATION_EASING }
+        );
+        reorderAnimations.set(el, anim);
+
+        const cleanup = () => {
+            if (reorderAnimations.get(el) === anim) {
+                reorderAnimations.delete(el);
+            }
+            el.style.willChange = '';
+        };
+        anim.onfinish = cleanup;
+        anim.oncancel = cleanup;
+    }
 }
 
 function captureScrollAnchor(scrollEl, grid) {

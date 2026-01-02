@@ -8,6 +8,7 @@
 
 - [x] MINOR-8: Add inventory sorting (amount/name)
 - [x] FIX-23: Auto refresh missing icons when prerender completes (retry continues)
+- [x] FIX-24: Animate inventory reorder when sorting by amount
 - [x] FIX-22: Smooth inventory tooltip follow (rAF throttle + cached size)
 - [x] TASTE-16: Split CraftingHandler/PrerenderHandler into dedicated sub-handlers (reduce file size and responsibilities)
 - [x] TASTE-15: Split frontend JS into `web/js/*` modules and load via `type="module"`
