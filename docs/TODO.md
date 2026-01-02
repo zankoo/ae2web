@@ -6,6 +6,7 @@
 
 ## Completed
 
+- [x] FIX-22: Smooth inventory tooltip follow (rAF throttle + cached size)
 - [x] TASTE-16: Split CraftingHandler/PrerenderHandler into dedicated sub-handlers (reduce file size and responsibilities)
 - [x] TASTE-15: Split frontend JS into `web/js/*` modules and load via `type="module"`
 - [x] TASTE-14: Don’t swallow `InterruptedException` in prerender HTTP retries (restore interrupt + fail fast)

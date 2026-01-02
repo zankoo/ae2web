@@ -490,6 +490,10 @@ body {
 /* Tooltip */
 .ae2web-tooltip {
     position: fixed;
+    left: 0;
+    top: 0;
+    transform: translate3d(0, 0, 0);
+    will-change: transform;
     z-index: 9999;
     pointer-events: none;
     background: rgba(16, 16, 20, 0.95);

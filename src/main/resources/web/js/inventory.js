@@ -2,6 +2,7 @@ import { API_BASE, AUTH_TOKEN, PLACEHOLDER_ICON, state } from './state.js';
 import { apiRequest } from './api.js';
 import { formatAmount, formatNumber, matchItem } from './utils.js';
 import { openCraftModal } from './craft.js';
+import { createTooltipPositioner } from './tooltipPositioner.js';
 
 let iconObserver = null;
 const loadedIcons = new Set();
@@ -16,6 +17,10 @@ const tooltipCache = new Map(); // iconKey -> string[]
 let tooltipEl = null;
 let tooltipVisible = false;
 let tooltipHoverKey = null;
+let tooltipPositioner = null;
+let tooltipLastX = 0;
+let tooltipLastY = 0;
+let tooltipHasLastPos = false;
 
 function iconUrlFor(iconKey) {
     if (AUTH_TOKEN) {
@@ -445,8 +450,13 @@ function bindInventoryTooltipHandlers(grid) {
         const iconKey = slot.dataset.iconId;
         if (!iconKey) return;
 
+        tooltipLastX = e.clientX;
+        tooltipLastY = e.clientY;
+        tooltipHasLastPos = true;
+
         tooltipHoverKey = iconKey;
         showTooltipLoading();
+        ensureTooltipPositioner().onMouseMove(tooltipLastX, tooltipLastY);
         requestTooltip(iconKey).catch(() => {
             if (tooltipHoverKey !== iconKey) return;
             renderTooltip(['(tooltip not prerendered yet)']);
@@ -455,7 +465,10 @@ function bindInventoryTooltipHandlers(grid) {
 
     grid.addEventListener('mousemove', (e) => {
         if (!tooltipVisible || !tooltipEl) return;
-        positionTooltip(e.clientX, e.clientY);
+        tooltipLastX = e.clientX;
+        tooltipLastY = e.clientY;
+        tooltipHasLastPos = true;
+        ensureTooltipPositioner().onMouseMove(tooltipLastX, tooltipLastY);
     });
 
     grid.addEventListener('mouseout', (e) => {
@@ -463,6 +476,7 @@ function bindInventoryTooltipHandlers(grid) {
         const toSlot = e.relatedTarget?.closest?.('.item-slot');
         if (fromSlot && fromSlot === toSlot) return;
         tooltipHoverKey = null;
+        tooltipHasLastPos = false;
         hideTooltip();
     });
 }
@@ -494,11 +508,32 @@ function ensureTooltipEl() {
     return tooltipEl;
 }
 
+function ensureTooltipPositioner() {
+    ensureTooltipEl();
+    if (tooltipPositioner) return tooltipPositioner;
+
+    tooltipPositioner = createTooltipPositioner({
+        requestAnimationFrame: (callback) => window.requestAnimationFrame(callback),
+        cancelAnimationFrame: (id) => window.cancelAnimationFrame(id),
+        getTooltipSize: () => {
+            const rect = tooltipEl.getBoundingClientRect();
+            return { width: rect.width, height: rect.height };
+        },
+        getViewportSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
+        applyPosition: (left, top) => {
+            tooltipEl.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+        },
+    });
+
+    return tooltipPositioner;
+}
+
 function showTooltipLoading() {
     ensureTooltipEl();
     tooltipEl.innerHTML = '<div class="ae2web-tooltip-line">Loading...</div>';
     tooltipEl.style.display = 'block';
     tooltipVisible = true;
+    ensureTooltipPositioner().invalidateSize();
 }
 
 function renderTooltip(lines) {
@@ -512,34 +547,18 @@ function renderTooltip(lines) {
     }
     tooltipEl.style.display = 'block';
     tooltipVisible = true;
+    const positioner = ensureTooltipPositioner();
+    positioner.invalidateSize();
+    if (tooltipHasLastPos) {
+        positioner.onMouseMove(tooltipLastX, tooltipLastY);
+    }
 }
 
 function hideTooltip() {
     if (!tooltipEl) return;
     tooltipEl.style.display = 'none';
     tooltipVisible = false;
-}
-
-function positionTooltip(x, y) {
-    if (!tooltipEl) return;
-
-    const padding = 12;
-    const margin = 10;
-    let left = x + margin;
-    let top = y + margin;
-
-    tooltipEl.style.left = `${left}px`;
-    tooltipEl.style.top = `${top}px`;
-
-    const rect = tooltipEl.getBoundingClientRect();
-    const maxLeft = window.innerWidth - rect.width - padding;
-    const maxTop = window.innerHeight - rect.height - padding;
-
-    if (left > maxLeft) left = Math.max(padding, x - rect.width - margin);
-    if (top > maxTop) top = Math.max(padding, y - rect.height - margin);
-
-    tooltipEl.style.left = `${left}px`;
-    tooltipEl.style.top = `${top}px`;
+    tooltipPositioner?.cancel();
 }
 
 function escapeHtml(str) {
