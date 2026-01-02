@@ -737,7 +737,7 @@ body {
 
 .cpu-list {
     min-height: 60px;
-    max-height: 200px;
+    max-height: 400px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -847,6 +847,11 @@ body {
     color: var(--ae2-text);
 }
 
+.modal-header svg {
+    width: 24px;
+    height: 24px;
+}
+
 .modal-header h3 {
     font-size: 1.1rem;
     font-weight: 700;
@@ -951,6 +956,21 @@ body {
     align-items: center;
     padding: 0 12px;
     height: 40px;
+}
+
+.cpu-select-icon {
+    width: 20px;
+    height: 20px;
+    color: var(--ae2-text-dim);
+    margin-right: 8px;
+}
+
+.cpu-select-arrow {
+    width: 16px;
+    height: 16px;
+    color: var(--ae2-text-dim);
+    margin-left: 8px;
+    pointer-events: none;
 }
 
 .cpu-select {

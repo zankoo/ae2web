@@ -50,8 +50,7 @@ export function openCraftModal(id, name, type = 'item', iconKey) {
     img.src = AUTH_TOKEN
         ? `/api/prerender/image?id=${encodeURIComponent(iconKey)}&token=${encodeURIComponent(AUTH_TOKEN)}`
         : `/api/prerender/image?id=${encodeURIComponent(iconKey)}`;
-    img.style.width = '48px';
-    img.style.height = '48px';
+
     img.style.imageRendering = 'pixelated';
     img.onerror = () => { img.src = PLACEHOLDER_ICON; };
     iconContainer.appendChild(img);
