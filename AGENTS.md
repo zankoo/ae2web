@@ -23,6 +23,7 @@ It exposes the ME network inventory + crafting controls via an embedded Netty HT
 ```bash
 ./gradlew clean build        # Clean + build mod JAR (default for agents)
 ./gradlew build              # Build mod JAR
+./gradlew webuiBuild         # Build Web UI (SvelteKit → webui/build)
 ./gradlew runClient          # Dev client with mod loaded
 ./gradlew runServer          # Dev server
 ./gradlew runGameTestServer  # Game tests
@@ -30,11 +31,18 @@ It exposes the ME network inventory + crafting controls via an embedded Netty HT
 ./gradlew test               # Unit tests
 ```
 
-Offline build (recommended for agents in constrained environments):
+Web UI (SvelteKit SPA):
 
 ```bash
-./gradlew clean build --offline
+npm -C webui ci        # Install frontend deps (reproducible)
+npm -C webui run dev   # Vite dev server (proxies /api to 127.0.0.1:8080)
+npm -C webui test      # Vitest
+npm -C webui run check # svelte-check (TypeScript + Svelte)
 ```
+
+Note: `./gradlew clean build` runs `webuiBuild` (Node download + `npm ci` + `npm run build`) and packages `webui/build/**` into the mod JAR.
+`npm -C webui run dev` uses the system Node; if you need to change the backend target, edit `webui/vite.config.ts`.
+Offline builds are no longer guaranteed after the SvelteKit migration (need pre-warmed Gradle + npm caches).
 
 ## Testing (Required)
 
@@ -43,7 +51,8 @@ Offline build (recommended for agents in constrained environments):
 - Use Awaitility for async/eventual-consistency tests (avoid `Thread.sleep()`).
 - Use WireMock or MockWebServer for HTTP client tests.
 - Use Testcontainers when a real dependency is required (MySQL/Redis/Kafka/etc).
-- After completing each task, run unit tests: `./gradlew test` (or `./gradlew clean build` for full verification).
+- After completing each task, run unit tests: `./gradlew test` (or `./gradlew clean build` for full verification, including frontend build).
+- If the change touches `webui/`, also run: `npm -C webui test` (and ideally `npm -C webui run check`).
 
 If Gradle fails early with a ForgeGradle certificate pinning error like:
 
@@ -102,8 +111,13 @@ Guideline: never use plain `id` or `hashCode()` as a UI key; NBT variants must r
 
 ## Web UI (Current)
 
-- Entry: `src/main/resources/web/index.html` loads `src/main/resources/web/js/app.js` via `type="module"`
-- Modules live under: `src/main/resources/web/js/*`
+- Source: `webui/` (SvelteKit SPA, TypeScript)
+  - Main UI: `webui/src/routes/+page.svelte`
+  - SPA config: `webui/src/routes/+layout.ts` (`ssr = false`, `prerender = true`)
+  - Global CSS (ported from legacy): `webui/src/app.css`
+  - Build output: `webui/build/` (adapter-static)
+- Packaging: Gradle copies `webui/build/**` into classpath `web/` during `processResources` (see `build.gradle`)
+- Legacy `src/main/resources/web/**` is kept for reference but excluded from the JAR at build time.
 
 Inventory UI behavior:
 - UI renders full inventory snapshot (no pagination).
