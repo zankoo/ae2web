@@ -65,81 +65,58 @@ public class RenderCommand {
         int fetchLimit = limit > 0 ? limit : 100000;
         PrerenderHttpClient client = PrerenderHttpClient.getInstance();
 
-        // First get stats to know how many are missing
-        client.getStats(serverUrl).thenAccept(stats -> {
-            int missing = stats.getOrDefault("missingCount", 0);
-            if (missing == 0) {
-                Minecraft.getInstance().execute(() -> {
-                    int total = stats.getOrDefault("totalItems", 0);
-                    sendMessage(ctx, "All " + total + " items already rendered!");
-                });
-                return;
-            }
-
-            int toRender = limit > 0 ? Math.min(limit, missing) : missing;
-            Minecraft.getInstance().execute(() ->
-                    sendMessage(ctx, "Found " + missing + " missing icons, fetching " + toRender + "..."));
-
-            // Fetch missing items
-            client.fetchMissingIcons(finalServerUrl, fetchLimit)
-                    .thenAccept(missingItems -> {
-                        if (missingItems.isEmpty()) {
-                            Minecraft.getInstance().execute(() ->
-                                    sendMessage(ctx, "Server returned empty list. Try again."));
-                            return;
-                        }
-
+        client.fetchMissingIcons(finalServerUrl, fetchLimit)
+                .thenAccept(missingItems -> {
+                    if (missingItems.isEmpty()) {
                         Minecraft.getInstance().execute(() ->
-                                sendMessage(ctx, "Got " + missingItems.size() + " missing icons, claiming..."));
+                                sendMessage(ctx, "No missing icons found."));
+                        return;
+                    }
 
-                        // Extract iconKeys for claiming
-                        List<String> iconKeys = missingItems.stream()
-                                .map(PrerenderHttpClient.MissingIconItem::iconKey)
-                                .collect(Collectors.toList());
+                    Minecraft.getInstance().execute(() ->
+                            sendMessage(ctx, "Got " + missingItems.size() + " missing icons, claiming..."));
 
-                        // Claim items
-                        client.claimItems(finalServerUrl, iconKeys)
-                                .thenAccept(result -> {
-                                    if (result.claimed().isEmpty()) {
-                                        Minecraft.getInstance().execute(() -> {
-                                            if (result.hasLockedByOthers()) {
-                                                sendMessage(ctx, "All " + result.lockedByOthers() + " items being rendered by another client.");
-                                            } else if (result.alreadyRendered() > 0) {
-                                                sendMessage(ctx, "All " + result.alreadyRendered() + " items already rendered.");
-                                            } else {
-                                                sendMessage(ctx, "No items to render.");
-                                            }
-                                        });
-                                        return;
-                                    }
+                    // Extract iconKeys for claiming
+                    List<String> iconKeys = missingItems.stream()
+                            .map(PrerenderHttpClient.MissingIconItem::iconKey)
+                            .collect(Collectors.toList());
 
-                                    // Filter to only include claimed items
-                                    List<PrerenderHttpClient.MissingIconItem> claimedItems = missingItems.stream()
-                                            .filter(item -> result.claimed().contains(item.iconKey()))
-                                            .collect(Collectors.toList());
-
+                    client.claimItems(finalServerUrl, iconKeys)
+                            .thenAccept(result -> {
+                                if (result.claimed().isEmpty()) {
                                     Minecraft.getInstance().execute(() -> {
-                                        String extra = "";
-                                        if (result.lockedBySelf() > 0) {
-                                            extra = " (including " + result.lockedBySelf() + " already claimed by this client)";
+                                        if (result.hasLockedByOthers()) {
+                                            sendMessage(ctx, "All " + result.lockedByOthers() + " items being rendered by another client.");
+                                        } else if (result.alreadyRendered() > 0) {
+                                            sendMessage(ctx, "All " + result.alreadyRendered() + " items already rendered.");
+                                        } else {
+                                            sendMessage(ctx, "No items to render.");
                                         }
-                                        sendMessage(ctx, "Starting render for " + result.claimed().size() + " items" + extra + "...");
-                                        startRenderWithNbt(ctx, claimedItems, finalServerUrl);
                                     });
+                                    return;
+                                }
+
+                                // Filter to only include claimed items
+                                List<PrerenderHttpClient.MissingIconItem> claimedItems = missingItems.stream()
+                                        .filter(item -> result.claimed().contains(item.iconKey()))
+                                        .collect(Collectors.toList());
+
+                                Minecraft.getInstance().execute(() -> {
+                                    String extra = "";
+                                    if (result.lockedBySelf() > 0) {
+                                        extra = " (including " + result.lockedBySelf() + " already claimed by this client)";
+                                    }
+                                    sendMessage(ctx, "Starting render for " + result.claimed().size() + " items" + extra + "...");
+                                    startRenderWithNbt(ctx, claimedItems, finalServerUrl);
                                 });
-                    })
-                    .exceptionally(e -> {
-                        AE2WebMod.LOGGER.error("Failed to fetch missing icons", e);
-                        Minecraft.getInstance().execute(() ->
-                                sendMessage(ctx, "Failed: " + e.getMessage()));
-                        return null;
-                    });
-        }).exceptionally(e -> {
-            AE2WebMod.LOGGER.error("Failed to get stats", e);
-            Minecraft.getInstance().execute(() ->
-                    sendMessage(ctx, "Failed to connect to server: " + e.getMessage()));
-            return null;
-        });
+                            });
+                })
+                .exceptionally(e -> {
+                    AE2WebMod.LOGGER.error("Failed to fetch missing icons", e);
+                    Minecraft.getInstance().execute(() ->
+                            sendMessage(ctx, "Failed: " + e.getMessage()));
+                    return null;
+                });
 
         return 1;
     }
@@ -282,6 +259,7 @@ public class RenderCommand {
                                     sendMessage(ctx, "  Total items: " + stats.getOrDefault("totalItems", 0));
                                     sendMessage(ctx, "  Rendered: " + stats.getOrDefault("renderedCount", 0));
                                     sendMessage(ctx, "  Missing: " + stats.getOrDefault("missingCount", 0));
+                                    sendMessage(ctx, "  NBT variants: " + stats.getOrDefault("nbtVariantCount", 0));
                                 });
                             }
                         });

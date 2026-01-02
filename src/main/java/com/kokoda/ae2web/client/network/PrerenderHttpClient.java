@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.kokoda.ae2web.AE2WebMod;
+import com.kokoda.ae2web.config.AE2WebConfig;
+import com.kokoda.ae2web.util.PrerenderUtils;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -167,6 +169,8 @@ public class PrerenderHttpClient {
         }
     }
 
+    public record CheckResult(List<String> existing, List<String> missing) {}
+
     /**
      * Claim items for rendering (concurrency control).
      */
@@ -215,6 +219,67 @@ public class PrerenderHttpClient {
             } catch (Exception e) {
                 AE2WebMod.LOGGER.warn("Failed to claim items", e);
                 return new ClaimResult(Collections.emptyList(), 0, 0, 0);
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        }, executor);
+    }
+
+    /**
+     * Check which iconKeys exist on the server.
+     */
+    public CompletableFuture<CheckResult> checkItems(String serverUrl, List<String> iconKeys) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (iconKeys == null || iconKeys.isEmpty()) {
+                return new CheckResult(Collections.emptyList(), Collections.emptyList());
+            }
+
+            HttpURLConnection conn = null;
+            try {
+                String url = serverUrl + "/api/prerender/check";
+                conn = createConnection(url, "POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json");
+
+                JsonObject request = new JsonObject();
+                JsonArray ids = new JsonArray();
+                iconKeys.forEach(ids::add);
+                request.add("itemIds", ids);
+
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(GSON.toJson(request).getBytes(StandardCharsets.UTF_8));
+                }
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode != 200) {
+                    AE2WebMod.LOGGER.warn("Failed to check items: HTTP {}", responseCode);
+                    return new CheckResult(Collections.emptyList(), iconKeys);
+                }
+
+                String response;
+                try (var is = conn.getInputStream()) {
+                    response = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                }
+                JsonObject json = GSON.fromJson(response, JsonObject.class);
+
+                List<String> existing = new ArrayList<>();
+                List<String> missing = new ArrayList<>();
+
+                JsonArray existingArray = json.getAsJsonArray("existing");
+                if (existingArray != null) {
+                    existingArray.forEach(e -> existing.add(e.getAsString()));
+                }
+                JsonArray missingArray = json.getAsJsonArray("missing");
+                if (missingArray != null) {
+                    missingArray.forEach(e -> missing.add(e.getAsString()));
+                }
+
+                return new CheckResult(existing, missing);
+            } catch (Exception e) {
+                AE2WebMod.LOGGER.warn("Failed to check items", e);
+                return new CheckResult(Collections.emptyList(), iconKeys);
             } finally {
                 if (conn != null) {
                     conn.disconnect();
@@ -381,6 +446,9 @@ public class PrerenderHttpClient {
         conn.setConnectTimeout(TIMEOUT_MS);
         conn.setReadTimeout(TIMEOUT_MS);
         conn.setRequestProperty("User-Agent", "AE2WebTerminal-Client");
+        if (AE2WebConfig.isAuthEnabled()) {
+            PrerenderUtils.applyBearerAuth(conn, AE2WebConfig.getAuthToken());
+        }
         return conn;
     }
 

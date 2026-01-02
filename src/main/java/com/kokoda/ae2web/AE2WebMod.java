@@ -63,12 +63,14 @@ public class AE2WebMod {
         LOGGER.info("Starting AE2 Web Terminal HTTP server...");
         WebServer.getInstance().start();
         PrerenderStorageService.getInstance().initialize();
+        PrerenderStorageService.getInstance().startMaintenance();
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         LOGGER.info("Stopping AE2 Web Terminal HTTP server...");
         CraftingHandler.shutdownExecutor();
+        PrerenderStorageService.getInstance().shutdownMaintenance();
         WebServer.getInstance().stop();
     }
 }

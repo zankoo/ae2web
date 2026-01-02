@@ -227,8 +227,19 @@ public final class WebServer {
     }
 
     public void unregisterTerminal(WebTerminalBlockEntity terminal) {
-        terminals.remove(terminal.getTerminalId());
-        Set<Channel> subs = terminalInventorySubscribers.remove(terminal.getTerminalId());
+        if (terminal == null) {
+            return;
+        }
+        unregisterTerminalById(terminal.getTerminalId());
+    }
+
+    public void unregisterTerminalById(String terminalId) {
+        if (terminalId == null || terminalId.isBlank()) {
+            return;
+        }
+
+        terminals.remove(terminalId);
+        Set<Channel> subs = terminalInventorySubscribers.remove(terminalId);
         if (subs != null) {
             for (Channel ch : subs) {
                 if (ch != null) {
@@ -240,8 +251,8 @@ public final class WebServer {
                 }
             }
         }
-        terminalInventoryVersions.remove(terminal.getTerminalId());
-        AE2WebMod.LOGGER.debug("Unregistered terminal: {}", terminal.getTerminalId());
+        terminalInventoryVersions.remove(terminalId);
+        AE2WebMod.LOGGER.debug("Unregistered terminal: {}", terminalId);
     }
 
     public Map<String, WebTerminalBlockEntity> getTerminals() {

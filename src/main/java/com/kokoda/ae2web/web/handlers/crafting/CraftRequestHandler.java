@@ -8,7 +8,6 @@ import appeng.api.networking.crafting.ICraftingService;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
-import com.google.gson.JsonObject;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -18,7 +17,6 @@ import io.netty.util.CharsetUtil;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
@@ -28,7 +26,6 @@ import java.util.concurrent.TimeoutException;
 import static com.kokoda.ae2web.web.handlers.HandlerUtils.*;
 
 public final class CraftRequestHandler {
-    private static final long MAX_CRAFT_AMOUNT = 1_000_000;
     private static final int CRAFT_CALCULATION_TIMEOUT_SECONDS = 10;
 
     private CraftRequestHandler() {}
@@ -36,9 +33,9 @@ public final class CraftRequestHandler {
     public static void handleCraft(ChannelHandlerContext ctx, FullHttpRequest request,
                                    Map<String, java.util.List<String>> params, HttpHeaders headers) {
         String body = request.content().toString(CharsetUtil.UTF_8);
-        CraftRequest craftRequest;
+        CraftRequestParser.CraftRequest craftRequest;
         try {
-            craftRequest = parseCraftRequest(body);
+            craftRequest = CraftRequestParser.parse(body);
         } catch (IllegalArgumentException e) {
             sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
                     errorJson("Invalid craft request"), headers);
@@ -46,79 +43,6 @@ public final class CraftRequestHandler {
         }
 
         runOnServerThread(ctx, headers, () -> executeCraftRequest(ctx, headers, craftRequest));
-    }
-
-    private enum CraftKeyType { ITEM, FLUID }
-
-    private record CraftRequest(CraftKeyType keyType, String id, long amount, String cpuName, String terminalId) {}
-
-    private static CraftRequest parseCraftRequest(String body) {
-        if (body == null || body.isBlank()) {
-            throw new IllegalArgumentException("Body required");
-        }
-
-        JsonObject json;
-        try {
-            json = GSON.fromJson(body, JsonObject.class);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid JSON", e);
-        }
-
-        if (json == null) {
-            throw new IllegalArgumentException("Invalid JSON");
-        }
-
-        if (!json.has("type") || json.get("type").isJsonNull()) {
-            throw new IllegalArgumentException("type required");
-        }
-        String rawType = json.get("type").getAsString();
-        if (rawType == null || rawType.isBlank()) {
-            throw new IllegalArgumentException("type required");
-        }
-        CraftKeyType keyType = switch (rawType.trim().toLowerCase(Locale.ROOT)) {
-            case "item", "items" -> CraftKeyType.ITEM;
-            case "fluid", "fluids" -> CraftKeyType.FLUID;
-            default -> throw new IllegalArgumentException("Invalid type");
-        };
-
-        if (!json.has("id") || json.get("id").isJsonNull()) {
-            throw new IllegalArgumentException("id required");
-        }
-        String id = json.get("id").getAsString();
-        if (id == null || id.isBlank()) {
-            throw new IllegalArgumentException("id required");
-        }
-
-        long amount = 1;
-        if (json.has("amount")) {
-            try {
-                amount = json.get("amount").getAsLong();
-            } catch (Exception e) {
-                throw new IllegalArgumentException("Invalid amount", e);
-            }
-        }
-
-        if (amount <= 0 || amount > MAX_CRAFT_AMOUNT) {
-            throw new IllegalArgumentException("Invalid amount");
-        }
-
-        String cpuName = null;
-        if (json.has("cpuName") && !json.get("cpuName").isJsonNull()) {
-            cpuName = json.get("cpuName").getAsString();
-            if (cpuName != null && cpuName.isBlank()) {
-                cpuName = null;
-            }
-        }
-
-        String terminalId = null;
-        if (json.has("terminalId") && !json.get("terminalId").isJsonNull()) {
-            terminalId = json.get("terminalId").getAsString();
-            if (terminalId != null && terminalId.isBlank()) {
-                terminalId = null;
-            }
-        }
-
-        return new CraftRequest(keyType, id, amount, cpuName, terminalId);
     }
 
     private record CraftContext(
@@ -129,7 +53,7 @@ public final class CraftRequestHandler {
             String cpuName
     ) {}
 
-    private static void executeCraftRequest(ChannelHandlerContext ctx, HttpHeaders headers, CraftRequest request) {
+    private static void executeCraftRequest(ChannelHandlerContext ctx, HttpHeaders headers, CraftRequestParser.CraftRequest request) {
         WebTerminalBlockEntity terminal = getConnectedTerminal(request.terminalId());
         if (terminal == null) {
             sendJsonResponse(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE,
@@ -159,7 +83,7 @@ public final class CraftRequestHandler {
         }
 
         AEKey key;
-        if (request.keyType() == CraftKeyType.FLUID) {
+        if (request.keyType() == CraftRequestParser.CraftKeyType.FLUID) {
             var fluid = BuiltInRegistries.FLUID.getOptional(keyId).orElse(null);
             if (fluid == null || fluid == net.minecraft.world.level.material.Fluids.EMPTY) {
                 sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
@@ -285,4 +209,3 @@ public final class CraftRequestHandler {
         };
     }
 }
-

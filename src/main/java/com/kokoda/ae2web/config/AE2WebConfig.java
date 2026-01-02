@@ -8,6 +8,18 @@ public class AE2WebConfig {
     public static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
     public static final ForgeConfigSpec SPEC;
 
+    private static final int DEFAULT_HTTP_PORT = 8080;
+    private static final String DEFAULT_BIND_ADDRESS = "0.0.0.0";
+    private static final boolean DEFAULT_ENABLE_AUTH = false;
+    private static final String DEFAULT_AUTH_TOKEN = "change-me-to-a-secure-token";
+
+    private static final boolean DEFAULT_PRERENDER_ENABLED = true;
+    private static final int DEFAULT_PRERENDER_MAX_UPLOAD_SIZE = 65536;
+    private static final int DEFAULT_PRERENDER_CACHE_SIZE = 1024;
+    private static final int DEFAULT_PRERENDER_AUTO_MAX_ITEMS = 0;
+    private static final int DEFAULT_PRERENDER_GC_TTL_SECONDS = 7 * 24 * 60 * 60;
+    private static final int DEFAULT_PRERENDER_GC_INTERVAL_SECONDS = 300;
+
     public static final ForgeConfigSpec.IntValue HTTP_PORT;
     public static final ForgeConfigSpec.ConfigValue<String> BIND_ADDRESS;
     public static final ForgeConfigSpec.ConfigValue<String> AUTH_TOKEN;
@@ -18,25 +30,27 @@ public class AE2WebConfig {
     public static final ForgeConfigSpec.IntValue PRERENDER_MAX_UPLOAD_SIZE;
     public static final ForgeConfigSpec.IntValue PRERENDER_CACHE_SIZE;
     public static final ForgeConfigSpec.IntValue PRERENDER_AUTO_MAX_ITEMS;
+    public static final ForgeConfigSpec.IntValue PRERENDER_GC_TTL_SECONDS;
+    public static final ForgeConfigSpec.IntValue PRERENDER_GC_INTERVAL_SECONDS;
 
     static {
         BUILDER.push("server");
 
         HTTP_PORT = BUILDER
                 .comment("HTTP server port for web terminal access")
-                .defineInRange("httpPort", 8080, 1024, 65535);
+                .defineInRange("httpPort", DEFAULT_HTTP_PORT, 1024, 65535);
 
         BIND_ADDRESS = BUILDER
                 .comment("Bind address for HTTP server (0.0.0.0 for all interfaces, 127.0.0.1 for localhost only)")
-                .define("bindAddress", "0.0.0.0");
+                .define("bindAddress", DEFAULT_BIND_ADDRESS);
         
         ENABLE_AUTH = BUILDER
                 .comment("Enable token authentication for API access")
-                .define("enableAuth", false);
+                .define("enableAuth", DEFAULT_ENABLE_AUTH);
         
         AUTH_TOKEN = BUILDER
                 .comment("Authentication token for API access (set your own secure token)")
-                .define("authToken", "change-me-to-a-secure-token");
+                .define("authToken", DEFAULT_AUTH_TOKEN);
 
         BUILDER.pop();
 
@@ -44,19 +58,27 @@ public class AE2WebConfig {
 
         PRERENDER_ENABLED = BUILDER
                 .comment("Enable client-side pre-rendering of item icons")
-                .define("enabled", true);
+                .define("enabled", DEFAULT_PRERENDER_ENABLED);
 
         PRERENDER_MAX_UPLOAD_SIZE = BUILDER
                 .comment("Maximum size in bytes for uploaded PNG icons (default 64KB)")
-                .defineInRange("maxUploadSize", 65536, 1024, 262144);
+                .defineInRange("maxUploadSize", DEFAULT_PRERENDER_MAX_UPLOAD_SIZE, 1024, 262144);
 
         PRERENDER_CACHE_SIZE = BUILDER
                 .comment("Number of pre-rendered icons to cache in memory")
-                .defineInRange("cacheSize", 1024, 100, 10000);
+                .defineInRange("cacheSize", DEFAULT_PRERENDER_CACHE_SIZE, 100, 10000);
 
         PRERENDER_AUTO_MAX_ITEMS = BUILDER
                 .comment("Maximum number of items to auto-render when player joins (0 = unlimited)")
-                .defineInRange("autoMaxItems", 0, 0, 100000);
+                .defineInRange("autoMaxItems", DEFAULT_PRERENDER_AUTO_MAX_ITEMS, 0, 100000);
+
+        PRERENDER_GC_TTL_SECONDS = BUILDER
+                .comment("Delete NBT-variant prerenders that have not been seen for this many seconds (0 = disabled)")
+                .defineInRange("gcTtlSeconds", DEFAULT_PRERENDER_GC_TTL_SECONDS, 0, 365 * 24 * 60 * 60);
+
+        PRERENDER_GC_INTERVAL_SECONDS = BUILDER
+                .comment("How often to run prerender maintenance (seen persistence + GC) in seconds (0 = disabled)")
+                .defineInRange("gcIntervalSeconds", DEFAULT_PRERENDER_GC_INTERVAL_SECONDS, 0, 3600);
 
         BUILDER.pop();
         SPEC = BUILDER.build();
@@ -67,34 +89,50 @@ public class AE2WebConfig {
     }
 
     public static int getHttpPort() {
-        return HTTP_PORT.get();
+        return getOrDefault(HTTP_PORT, DEFAULT_HTTP_PORT);
     }
 
     public static String getBindAddress() {
-        return BIND_ADDRESS.get();
+        return getOrDefault(BIND_ADDRESS, DEFAULT_BIND_ADDRESS);
     }
 
     public static boolean isAuthEnabled() {
-        return ENABLE_AUTH.get();
+        return getOrDefault(ENABLE_AUTH, DEFAULT_ENABLE_AUTH);
     }
 
     public static String getAuthToken() {
-        return AUTH_TOKEN.get();
+        return getOrDefault(AUTH_TOKEN, DEFAULT_AUTH_TOKEN);
     }
 
     public static boolean isPrerenderEnabled() {
-        return PRERENDER_ENABLED.get();
+        return getOrDefault(PRERENDER_ENABLED, DEFAULT_PRERENDER_ENABLED);
     }
 
     public static int getPrerenderMaxUploadSize() {
-        return PRERENDER_MAX_UPLOAD_SIZE.get();
+        return getOrDefault(PRERENDER_MAX_UPLOAD_SIZE, DEFAULT_PRERENDER_MAX_UPLOAD_SIZE);
     }
 
     public static int getPrerenderCacheSize() {
-        return PRERENDER_CACHE_SIZE.get();
+        return getOrDefault(PRERENDER_CACHE_SIZE, DEFAULT_PRERENDER_CACHE_SIZE);
     }
 
     public static int getPrerenderAutoMaxItems() {
-        return PRERENDER_AUTO_MAX_ITEMS.get();
+        return getOrDefault(PRERENDER_AUTO_MAX_ITEMS, DEFAULT_PRERENDER_AUTO_MAX_ITEMS);
+    }
+
+    public static int getPrerenderGcTtlSeconds() {
+        return getOrDefault(PRERENDER_GC_TTL_SECONDS, DEFAULT_PRERENDER_GC_TTL_SECONDS);
+    }
+
+    public static int getPrerenderGcIntervalSeconds() {
+        return getOrDefault(PRERENDER_GC_INTERVAL_SECONDS, DEFAULT_PRERENDER_GC_INTERVAL_SECONDS);
+    }
+
+    private static <T> T getOrDefault(ForgeConfigSpec.ConfigValue<T> configValue, T defaultValue) {
+        try {
+            return configValue.get();
+        } catch (IllegalStateException e) {
+            return defaultValue;
+        }
     }
 }

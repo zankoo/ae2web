@@ -8,21 +8,37 @@ Keep it aligned with the actual code (not old docs).
 AE2 Web Terminal is a Minecraft Forge mod (MC 1.20.1) that adds a Web Terminal block connecting to Applied Energistics 2 (AE2) ME networks.
 It exposes the ME network inventory + crafting controls via an embedded Netty HTTP server and a small web UI.
 
+## Release Status & Compatibility
+
+- This project is not released yet; backward compatibility is NOT required.
+- Behavior changes and breaking changes (API/config/UI) are OK; do not add compatibility layers unless explicitly requested.
+
 ## Build Commands
 
 ```bash
+./gradlew clean build        # Clean + build mod JAR (default for agents)
 ./gradlew build              # Build mod JAR
 ./gradlew runClient          # Dev client with mod loaded
 ./gradlew runServer          # Dev server
 ./gradlew runGameTestServer  # Game tests
 ./gradlew runData            # Data generators
+./gradlew test               # Unit tests
 ```
 
 Offline build (recommended for agents in constrained environments):
 
 ```bash
-./gradlew build --offline
+./gradlew clean build --offline
 ```
+
+## Testing (Required)
+
+- Unit tests MUST use JUnit + Mockito.
+- Prefer AssertJ for assertions (example: `assertThat(list).hasSize(3).contains("a");`).
+- Use Awaitility for async/eventual-consistency tests (avoid `Thread.sleep()`).
+- Use WireMock or MockWebServer for HTTP client tests.
+- Use Testcontainers when a real dependency is required (MySQL/Redis/Kafka/etc).
+- After completing each task, run unit tests: `./gradlew test` (or `./gradlew clean build` for full verification).
 
 If Gradle fails early with a ForgeGradle certificate pinning error like:
 
@@ -57,7 +73,7 @@ To re-enable for stricter validation, remove that line or run with:
 - Prerender storage (PNG + translations): `src/main/java/com/kokoda/ae2web/web/prerender/PrerenderStorageService.java`
 
 **Client-side prerender pipeline**
-- Auto trigger (on join): `src/main/java/com/kokoda/ae2web/client/PrerenderTrigger.java`
+- Continuous polling + auto render (while connected): `src/main/java/com/kokoda/ae2web/client/PrerenderTrigger.java`
 - HTTP client to server prerender endpoints: `src/main/java/com/kokoda/ae2web/client/network/PrerenderHttpClient.java`
 - Render scheduler: `src/main/java/com/kokoda/ae2web/client/render/RenderScheduler.java`
 - Manual command: `src/main/java/com/kokoda/ae2web/client/command/RenderCommand.java` (`/ae2web render ...`)
@@ -102,12 +118,16 @@ Base: `/api/*`
 Prerender endpoints (server-side storage under `config/ae2web/prerender/`):
 - `GET /api/prerender/image?id=<iconKey>` → `image/png` or `404`
 - `GET /api/prerender/tooltip?id=<iconKey>` → `{ iconKey, tooltip: string[] }` or `404`
-- `GET /api/prerender/missing?namespace=<ns?>&limit=<n>` → items missing prerenders (includes NBT craftable variants), returns `stackNbt` when available
+- `GET /api/prerender/missing?scope=active|registry|all&namespace=<ns?>&limit=<n>` → missing iconKeys; `active` includes ME inventory + craftables (NBT-aware, default), `registry` is base items/fluids only
 - `POST /api/prerender/claim` → claim iconKeys for rendering (concurrency control)
 - `POST /api/prerender/upload` → upload rendered PNG + translated name + tooltip lines
 - `GET /api/prerender/stats` → cache/stats
 - `POST /api/prerender/check` → check existing/missing for a list of iconKeys
 - `GET /api/prerender/all?limit=<n>` → sample list of iconKeys (mostly registry-derived)
+
+Prerender cache maintenance:
+- Server persists last-seen timestamps in `config/ae2web/prerender/seen.json`
+- Server GC deletes old NBT-variant icons based on `prerender.gcTtlSeconds` (runs every `prerender.gcIntervalSeconds`)
 
 ## Version Control & Semantic Versioning
 
@@ -159,7 +179,7 @@ Prerender endpoints (server-side storage under `config/ae2web/prerender/`):
 
 - Commit message 格式: `<type>: <description>`
 - type: `feat`(新功能), `fix`(修复), `refactor`(重构), `chore`(杂项), `docs`(文档)
-- 每次提交前必须运行 `./gradlew build` 确保编译通过
+- 每次提交前必须运行 `./gradlew clean build` 确保编译通过
 
 ## Automation Tasks & TODO.md
 File: keep a single docs/TODO.md to track phased tasks.

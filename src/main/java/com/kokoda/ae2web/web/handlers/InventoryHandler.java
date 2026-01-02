@@ -76,6 +76,9 @@ public final class InventoryHandler {
 
             List<FilteredEntry> sortedItems = sortForUi(filteredItems);
 
+            // Mark all keys returned to the UI as "seen" so server-side TTL GC won't delete them while they're active.
+            storage.markSeen(sortedItems.stream().map(e -> IconKeyUtils.iconKey(e.key())).toList());
+
             List<Object> pageItems = new ArrayList<>();
             for (FilteredEntry entry : sortedItems) {
                 if (entry.key() instanceof AEItemKey itemKey) {

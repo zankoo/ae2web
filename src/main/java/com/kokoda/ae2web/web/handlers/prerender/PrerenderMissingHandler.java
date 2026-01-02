@@ -8,6 +8,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import com.kokoda.ae2web.util.IconKeyUtils;
+import com.kokoda.ae2web.util.PrerenderUtils;
 import com.kokoda.ae2web.web.WebServer;
 import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
 import io.netty.channel.ChannelHandlerContext;
@@ -34,6 +35,15 @@ public final class PrerenderMissingHandler {
     public static void handleMissing(ChannelHandlerContext ctx,
                                      Map<String, List<String>> params, HttpHeaders headers) {
         String namespace = getFirstParam(params, "namespace");
+        String scopeRaw = getFirstParam(params, "scope");
+        String scope = (scopeRaw == null || scopeRaw.isBlank()) ? "active" : scopeRaw.trim().toLowerCase(Locale.ROOT);
+        boolean includeActive = scope.equals("active") || scope.equals("all");
+        boolean includeRegistry = scope.equals("registry") || scope.equals("all");
+        if (!includeActive && !includeRegistry) {
+            sendJsonResponse(ctx, HttpResponseStatus.BAD_REQUEST,
+                    errorJson("Invalid scope (expected: active|registry|all)"), headers);
+            return;
+        }
         int limit;
         try {
             limit = parseIntParam(params, "limit", 100, 1, 100000);
@@ -47,100 +57,115 @@ public final class PrerenderMissingHandler {
             PrerenderStorageService storage = PrerenderStorageService.getInstance();
             storage.initialize();
 
-            List<ItemMissingInfo> registryItems = new ArrayList<>();
-
-            for (ResourceLocation itemId : ForgeRegistries.ITEMS.getKeys()) {
-                if (namespace != null && !itemId.getNamespace().equals(namespace)) {
-                    continue;
-                }
-                var item = ForgeRegistries.ITEMS.getValue(itemId);
-                if (item == null) {
-                    continue;
-                }
-                if (item == Items.AIR || "minecraft:air".equals(itemId.toString())) {
-                    continue;
-                }
-                String iconKey = IconKeyUtils.iconKey(AEItemKey.of(item));
-                if (!storage.hasIcon(iconKey)) {
-                    registryItems.add(new ItemMissingInfo(iconKey, null));
-                }
-            }
-
-            for (ResourceLocation fluidId : ForgeRegistries.FLUIDS.getKeys()) {
-                if (namespace != null && !fluidId.getNamespace().equals(namespace)) {
-                    continue;
-                }
-                var fluid = ForgeRegistries.FLUIDS.getValue(fluidId);
-                if (fluid != null && fluid != Fluids.EMPTY) {
-                    String iconKey = IconKeyUtils.iconKey(AEFluidKey.of(fluid));
-                    if (!storage.hasIcon(iconKey)) {
-                        registryItems.add(new ItemMissingInfo(iconKey, null));
-                    }
-                }
-            }
-
             Map<String, ItemMissingInfo> meNetworkItems = new LinkedHashMap<>();
             Map<String, WebTerminalBlockEntity> terminals = WebServer.getInstance().getTerminals();
-            for (WebTerminalBlockEntity terminal : terminals.values()) {
-                if (!terminal.isConnectedToGrid()) {
-                    continue;
-                }
+            List<String> seenActiveKeys = new ArrayList<>();
 
-                Map<AEKey, Long> inventory = terminal.getNetworkInventory(WebTerminalBlockEntity.KeyFilter.ALL);
-                for (AEKey key : inventory.keySet()) {
-                    if (namespace != null && !key.getId().getNamespace().equals(namespace)) {
-                        continue;
-                    }
-                    if ("minecraft:air".equals(key.getId().toString())) {
+            if (includeActive) {
+                for (WebTerminalBlockEntity terminal : terminals.values()) {
+                    if (!terminal.isConnectedToGrid()) {
                         continue;
                     }
 
-                    String iconKey = IconKeyUtils.iconKey(key);
-                    if (storage.hasIcon(iconKey) || meNetworkItems.containsKey(iconKey)) {
-                        continue;
-                    }
+                    Map<AEKey, Long> inventory = terminal.getNetworkInventory(WebTerminalBlockEntity.KeyFilter.ALL);
+                    for (AEKey key : inventory.keySet()) {
+                        if (namespace != null && !key.getId().getNamespace().equals(namespace)) {
+                            continue;
+                        }
+                        if ("minecraft:air".equals(key.getId().toString())) {
+                            continue;
+                        }
 
-                    String stackNbtBase64 = null;
-                    if (key instanceof AEItemKey itemKey) {
-                        stackNbtBase64 = serializeItemStackToBase64(itemKey.toStack());
-                    }
+                        String iconKey = IconKeyUtils.iconKey(key);
+                        seenActiveKeys.add(iconKey);
 
-                    meNetworkItems.put(iconKey, new ItemMissingInfo(iconKey, stackNbtBase64));
+                        if (storage.hasIcon(iconKey) || meNetworkItems.containsKey(iconKey)) {
+                            continue;
+                        }
+
+                        String stackNbtBase64 = null;
+                        if (key instanceof AEItemKey itemKey) {
+                            stackNbtBase64 = serializeItemStackToBase64(itemKey.toStack());
+                        }
+
+                        meNetworkItems.put(iconKey, new ItemMissingInfo(iconKey, stackNbtBase64));
+                    }
                 }
             }
 
             // Also include craftable-only keys (zero stock) so the UI can show correct icons/names for craftables.
             // Registry scanning cannot discover NBT variants, so we must ask AE2 crafting service.
-            for (WebTerminalBlockEntity terminal : terminals.values()) {
-                if (!terminal.isConnectedToGrid()) {
-                    continue;
+            if (includeActive) {
+                for (WebTerminalBlockEntity terminal : terminals.values()) {
+                    if (!terminal.isConnectedToGrid()) {
+                        continue;
+                    }
+
+                    ICraftingService craftingService = terminal.getCraftingService();
+                    if (craftingService == null) {
+                        continue;
+                    }
+
+                    Set<AEKey> craftables = craftingService.getCraftables(key -> key instanceof AEItemKey || key instanceof AEFluidKey);
+                    for (AEKey key : craftables) {
+                        if (namespace != null && !key.getId().getNamespace().equals(namespace)) {
+                            continue;
+                        }
+                        if ("minecraft:air".equals(key.getId().toString())) {
+                            continue;
+                        }
+
+                        String iconKey = IconKeyUtils.iconKey(key);
+                        seenActiveKeys.add(iconKey);
+
+                        if (storage.hasIcon(iconKey) || meNetworkItems.containsKey(iconKey)) {
+                            continue;
+                        }
+
+                        String stackNbtBase64 = null;
+                        if (key instanceof AEItemKey itemKey) {
+                            stackNbtBase64 = serializeItemStackToBase64(itemKey.toStack());
+                        }
+
+                        meNetworkItems.put(iconKey, new ItemMissingInfo(iconKey, stackNbtBase64));
+                    }
+                }
+            }
+
+            if (!seenActiveKeys.isEmpty()) {
+                storage.markSeen(seenActiveKeys);
+            }
+
+            List<ItemMissingInfo> registryItems = new ArrayList<>();
+            if (includeRegistry) {
+                for (ResourceLocation itemId : ForgeRegistries.ITEMS.getKeys()) {
+                    if (namespace != null && !itemId.getNamespace().equals(namespace)) {
+                        continue;
+                    }
+                    var item = ForgeRegistries.ITEMS.getValue(itemId);
+                    if (item == null) {
+                        continue;
+                    }
+                    if (item == Items.AIR || "minecraft:air".equals(itemId.toString())) {
+                        continue;
+                    }
+                    String iconKey = IconKeyUtils.iconKey(AEItemKey.of(item));
+                    if (!storage.hasIcon(iconKey)) {
+                        registryItems.add(new ItemMissingInfo(iconKey, null));
+                    }
                 }
 
-                ICraftingService craftingService = terminal.getCraftingService();
-                if (craftingService == null) {
-                    continue;
-                }
-
-                Set<AEKey> craftables = craftingService.getCraftables(key -> key instanceof AEItemKey || key instanceof AEFluidKey);
-                for (AEKey key : craftables) {
-                    if (namespace != null && !key.getId().getNamespace().equals(namespace)) {
+                for (ResourceLocation fluidId : ForgeRegistries.FLUIDS.getKeys()) {
+                    if (namespace != null && !fluidId.getNamespace().equals(namespace)) {
                         continue;
                     }
-                    if ("minecraft:air".equals(key.getId().toString())) {
-                        continue;
+                    var fluid = ForgeRegistries.FLUIDS.getValue(fluidId);
+                    if (fluid != null && fluid != Fluids.EMPTY) {
+                        String iconKey = IconKeyUtils.iconKey(AEFluidKey.of(fluid));
+                        if (!storage.hasIcon(iconKey)) {
+                            registryItems.add(new ItemMissingInfo(iconKey, null));
+                        }
                     }
-
-                    String iconKey = IconKeyUtils.iconKey(key);
-                    if (storage.hasIcon(iconKey) || meNetworkItems.containsKey(iconKey)) {
-                        continue;
-                    }
-
-                    String stackNbtBase64 = null;
-                    if (key instanceof AEItemKey itemKey) {
-                        stackNbtBase64 = serializeItemStackToBase64(itemKey.toStack());
-                    }
-
-                    meNetworkItems.put(iconKey, new ItemMissingInfo(iconKey, stackNbtBase64));
                 }
             }
 
@@ -148,8 +173,10 @@ public final class PrerenderMissingHandler {
             allMissing.addAll(meNetworkItems.values());
             allMissing.addAll(registryItems);
 
-            if (allMissing.size() > limit) {
-                allMissing = allMissing.subList(0, limit);
+            int totalMissing = allMissing.size();
+            boolean hasMore = PrerenderUtils.hasMore(totalMissing, limit);
+            if (totalMissing > limit) {
+                allMissing = new ArrayList<>(allMissing.subList(0, limit));
             }
 
             JsonArray missingArray = new JsonArray();
@@ -167,7 +194,7 @@ public final class PrerenderMissingHandler {
             response.add("missing", missingArray);
             response.addProperty("total", stats.get("totalItems"));
             response.addProperty("renderedCount", stats.get("renderedCount"));
-            response.addProperty("hasMore", allMissing.size() >= limit);
+            response.addProperty("hasMore", hasMore);
 
             sendJsonResponse(ctx, HttpResponseStatus.OK, GSON.toJson(response), headers);
         });

@@ -100,6 +100,9 @@ public final class PrerenderHandler {
 
             // Add all items
             for (ResourceLocation itemId : ForgeRegistries.ITEMS.getKeys()) {
+                if ("minecraft:air".equals(itemId.toString())) {
+                    continue;
+                }
                 var item = ForgeRegistries.ITEMS.getValue(itemId);
                 if (item == null) {
                     continue;
@@ -123,7 +126,9 @@ public final class PrerenderHandler {
                 }
             }
 
-            int totalItems = ForgeRegistries.ITEMS.getKeys().size();
+            int totalItems = (int) ForgeRegistries.ITEMS.getKeys().stream()
+                    .filter(id -> !"minecraft:air".equals(id.toString()))
+                    .count();
             int totalFluids = (int) ForgeRegistries.FLUIDS.getKeys().stream()
                     .filter(id -> {
                         var f = ForgeRegistries.FLUIDS.getValue(id);

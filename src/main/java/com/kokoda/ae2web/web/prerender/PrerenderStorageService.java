@@ -4,11 +4,11 @@ import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.config.AE2WebConfig;
 import com.kokoda.ae2web.util.IconKeyUtils;
+import com.kokoda.ae2web.util.PrerenderUtils;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -21,6 +21,9 @@ import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -30,6 +33,7 @@ import java.util.stream.Stream;
  * Storage location: config/ae2web/prerender/{namespace}/{path}.png
  * Translations stored in: config/ae2web/prerender/translations.json
  * Tooltips stored in: config/ae2web/prerender/tooltips.json
+ * Last-seen timestamps stored in: config/ae2web/prerender/seen.json
  */
 public class PrerenderStorageService {
     private static final PrerenderStorageService INSTANCE = new PrerenderStorageService();
@@ -40,21 +44,36 @@ public class PrerenderStorageService {
     private final Path storageRoot;
     private final Path translationsFile;
     private final Path tooltipsFile;
+    private final Path seenFile;
     private final Map<String, byte[]> iconCache;
     private final Object cacheLock = new Object();
+    private final Object metaFileLock = new Object();
     private final Object initLock = new Object();
     private final Set<String> existenceCache;
     private final Map<String, LockInfo> renderingLocks;
 
     private record LockInfo(String clientId, long expireTime) {}
-    private final Map<String, String> translations; // itemId -> translated name
-    private final Map<String, List<String>> tooltips; // iconKey -> tooltip lines (plain text, may include literal '§')
+
+    // iconKey -> translated name (client-side language)
+    private final Map<String, String> translations;
+    // iconKey -> tooltip lines (legacy formatting may include literal '§')
+    private final Map<String, List<String>> tooltips;
+    // iconKey -> last time it appeared in ME inventory/craftables (epoch millis)
+    private final Map<String, Long> lastSeen;
+    private volatile boolean seenDirty = false;
+    private volatile long lastSeenPersistAt = 0;
+    private volatile ScheduledExecutorService maintenanceExecutor = null;
+    private final Object maintenanceLock = new Object();
     private volatile boolean initialized = false;
 
     private PrerenderStorageService() {
-        this.storageRoot = Paths.get("config", "ae2web", "prerender");
+        String rootOverride = System.getProperty("ae2web.prerender.storageRoot");
+        this.storageRoot = (rootOverride != null && !rootOverride.isBlank())
+                ? Paths.get(rootOverride)
+                : Paths.get("config", "ae2web", "prerender");
         this.translationsFile = storageRoot.resolve("translations.json");
         this.tooltipsFile = storageRoot.resolve("tooltips.json");
+        this.seenFile = storageRoot.resolve("seen.json");
         // Use LinkedHashMap with accessOrder=true for LRU eviction
         // All access must be synchronized via cacheLock
         this.iconCache = new LinkedHashMap<>(128, 0.75f, true);
@@ -62,6 +81,7 @@ public class PrerenderStorageService {
         this.renderingLocks = new ConcurrentHashMap<>();
         this.translations = new ConcurrentHashMap<>();
         this.tooltips = new ConcurrentHashMap<>();
+        this.lastSeen = new ConcurrentHashMap<>();
     }
 
     public static PrerenderStorageService getInstance() {
@@ -83,6 +103,7 @@ public class PrerenderStorageService {
 
             try {
                 Files.createDirectories(storageRoot);
+                loadSeen();
                 scanExistingIcons();
                 loadTranslations();
                 loadTooltips();
@@ -116,10 +137,12 @@ public class PrerenderStorageService {
      * Save translations to JSON file.
      */
     private void saveTranslations() {
-        try (Writer writer = Files.newBufferedWriter(translationsFile, StandardCharsets.UTF_8)) {
-            GSON.toJson(translations, writer);
-        } catch (IOException e) {
-            AE2WebMod.LOGGER.warn("Failed to save translations", e);
+        synchronized (metaFileLock) {
+            try {
+                writeJsonAtomic(translationsFile, translations);
+            } catch (IOException e) {
+                AE2WebMod.LOGGER.warn("Failed to save translations", e);
+            }
         }
     }
 
@@ -139,10 +162,67 @@ public class PrerenderStorageService {
     }
 
     private void saveTooltips() {
-        try (Writer writer = Files.newBufferedWriter(tooltipsFile, StandardCharsets.UTF_8)) {
-            GSON.toJson(tooltips, writer);
-        } catch (IOException e) {
-            AE2WebMod.LOGGER.warn("Failed to save tooltips", e);
+        synchronized (metaFileLock) {
+            try {
+                writeJsonAtomic(tooltipsFile, tooltips);
+            } catch (IOException e) {
+                AE2WebMod.LOGGER.warn("Failed to save tooltips", e);
+            }
+        }
+    }
+
+    private void loadSeen() {
+        if (!Files.exists(seenFile)) return;
+
+        try (Reader reader = Files.newBufferedReader(seenFile, StandardCharsets.UTF_8)) {
+            Type type = new TypeToken<Map<String, Long>>() {}.getType();
+            Map<String, Long> loaded = GSON.fromJson(reader, type);
+            if (loaded != null) {
+                lastSeen.putAll(loaded);
+                AE2WebMod.LOGGER.debug("Loaded {} last-seen entries", lastSeen.size());
+            }
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.warn("Failed to load last-seen timestamps", e);
+        }
+    }
+
+    private void saveSeen(boolean force) {
+        long now = System.currentTimeMillis();
+        long minIntervalMs = 30000;
+        if (!force && (!seenDirty || (now - lastSeenPersistAt) < minIntervalMs)) {
+            return;
+        }
+
+        Map<String, Long> snapshot = new LinkedHashMap<>(lastSeen);
+        synchronized (metaFileLock) {
+            try {
+                writeJsonAtomic(seenFile, snapshot);
+                lastSeenPersistAt = now;
+                seenDirty = false;
+            } catch (IOException e) {
+                AE2WebMod.LOGGER.warn("Failed to save last-seen timestamps", e);
+            }
+        }
+    }
+
+    private static void writeJsonAtomic(Path targetFile, Object value) throws IOException {
+        Files.createDirectories(targetFile.getParent());
+        Path tmp = targetFile.resolveSibling(targetFile.getFileName() + ".tmp");
+
+        try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+            GSON.toJson(value, writer);
+        }
+
+        try {
+            Files.move(tmp, targetFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tmp, targetFile, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (IOException ignored) {
+            }
         }
     }
 
@@ -168,7 +248,16 @@ public class PrerenderStorageService {
                                     return;
                                 }
                                 rel = rel.substring(0, rel.length() - 4); // Remove .png
-                                existenceCache.add(namespace + ":" + rel);
+                                String iconKey = namespace + ":" + rel;
+                                existenceCache.add(iconKey);
+
+                                if (!lastSeen.containsKey(iconKey)) {
+                                    try {
+                                        lastSeen.put(iconKey, Files.getLastModifiedTime(f).toMillis());
+                                        seenDirty = true;
+                                    } catch (IOException ignored) {
+                                    }
+                                }
                             });
                 } catch (IOException e) {
                     AE2WebMod.LOGGER.warn("Failed to scan namespace directory: {}", nsDir, e);
@@ -178,6 +267,9 @@ public class PrerenderStorageService {
             AE2WebMod.LOGGER.warn("Failed to scan prerender storage", e);
         }
 
+        // Keep lastSeen small and consistent with existing icon files.
+        lastSeen.keySet().retainAll(existenceCache);
+        saveSeen(false);
         AE2WebMod.LOGGER.debug("Scanned {} existing prerendered icons", existenceCache.size());
     }
 
@@ -296,6 +388,10 @@ public class PrerenderStorageService {
                 iconCache.put(iconKey, pngData);
                 evictIfNeeded();
             }
+
+            // Record last-seen on save, so newly rendered icons don't get GC'd immediately.
+            lastSeen.put(iconKey, System.currentTimeMillis());
+            seenDirty = true;
 
             // Store translation if provided
             if (translatedName != null && !translatedName.isBlank()) {
@@ -517,7 +613,13 @@ public class PrerenderStorageService {
      * Get total counts for statistics.
      */
     public Map<String, Integer> getStats() {
-        int totalItems = ForgeRegistries.ITEMS.getKeys().size();
+        int totalItems = 0;
+        for (ResourceLocation itemId : ForgeRegistries.ITEMS.getKeys()) {
+            if ("minecraft:air".equals(itemId.toString())) {
+                continue;
+            }
+            totalItems++;
+        }
 
         // Count fluids (excluding EMPTY)
         int totalFluids = 0;
@@ -529,21 +631,49 @@ public class PrerenderStorageService {
         }
 
         int totalAll = totalItems + totalFluids;
-        int renderedCount = existenceCache.size();
+
+        // Base icons are keyed by AEItemKey.of(item) / AEFluidKey.of(fluid) without NBT.
+        // existenceCache also contains NBT variants; track both for clarity.
+        int renderedBase = 0;
+        for (ResourceLocation itemId : ForgeRegistries.ITEMS.getKeys()) {
+            if ("minecraft:air".equals(itemId.toString())) {
+                continue;
+            }
+            var item = ForgeRegistries.ITEMS.getValue(itemId);
+            if (item == null) {
+                continue;
+            }
+            if (existenceCache.contains(IconKeyUtils.iconKey(AEItemKey.of(item)))) {
+                renderedBase++;
+            }
+        }
+        for (ResourceLocation fluidId : ForgeRegistries.FLUIDS.getKeys()) {
+            var fluid = ForgeRegistries.FLUIDS.getValue(fluidId);
+            if (fluid == null || fluid == Fluids.EMPTY) {
+                continue;
+            }
+            if (existenceCache.contains(IconKeyUtils.iconKey(AEFluidKey.of(fluid)))) {
+                renderedBase++;
+            }
+        }
+
+        int renderedTotal = existenceCache.size();
         int cacheSize;
         synchronized (cacheLock) {
             cacheSize = iconCache.size();
         }
 
-        // Ensure missingCount is never negative (can happen if existenceCache has stale entries)
-        int missingCount = Math.max(0, totalAll - renderedCount);
+        int missingBase = Math.max(0, totalAll - renderedBase);
+        int nbtVariantCount = Math.max(0, renderedTotal - renderedBase);
 
         Map<String, Integer> stats = new LinkedHashMap<>();
         stats.put("totalItems", totalAll);
         stats.put("itemCount", totalItems);
         stats.put("fluidCount", totalFluids);
-        stats.put("renderedCount", renderedCount);
-        stats.put("missingCount", missingCount);
+        stats.put("renderedCount", renderedBase);
+        stats.put("missingCount", missingBase);
+        stats.put("renderedTotalCount", renderedTotal);
+        stats.put("nbtVariantCount", nbtVariantCount);
         stats.put("translationCount", translations.size());
         stats.put("cacheSize", cacheSize);
         stats.put("activeLocks", renderingLocks.size());
@@ -640,6 +770,9 @@ public class PrerenderStorageService {
         existenceCache.clear();
         renderingLocks.clear();
         translations.clear();
+        tooltips.clear();
+        lastSeen.clear();
+        seenDirty = false;
 
         try {
             if (Files.exists(storageRoot)) {
@@ -655,7 +788,7 @@ public class PrerenderStorageService {
                 }
             }
             Files.createDirectories(storageRoot);
-            AE2WebMod.LOGGER.info("Cleared all prerendered icons and translations");
+            AE2WebMod.LOGGER.info("Cleared all prerendered icons and metadata");
         } catch (IOException e) {
             AE2WebMod.LOGGER.error("Failed to clear prerender storage", e);
         }
@@ -675,5 +808,228 @@ public class PrerenderStorageService {
      */
     public Set<String> getAllStoredIds() {
         return Collections.unmodifiableSet(existenceCache);
+    }
+
+    /**
+     * Mark iconKeys as "seen" (appeared in current ME inventory/craftables).
+     * This drives time-based GC for high-churn NBT variants.
+     */
+    public void markSeen(Collection<String> iconKeys) {
+        if (iconKeys == null || iconKeys.isEmpty()) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        for (String iconKey : iconKeys) {
+            if (iconKey == null || iconKey.isBlank()) {
+                continue;
+            }
+            lastSeen.put(iconKey, now);
+        }
+        seenDirty = true;
+    }
+
+    /**
+     * Start periodic maintenance (seen persistence + TTL-based GC).
+     * Call on server start; must be paired with {@link #shutdownMaintenance()}.
+     */
+    public void startMaintenance() {
+        if (maintenanceExecutor != null && !maintenanceExecutor.isShutdown()) {
+            return;
+        }
+
+        synchronized (maintenanceLock) {
+            if (maintenanceExecutor != null && !maintenanceExecutor.isShutdown()) {
+                return;
+            }
+
+            int intervalSeconds = AE2WebConfig.getPrerenderGcIntervalSeconds();
+            if (intervalSeconds <= 0) {
+                return;
+            }
+
+            maintenanceExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "AE2Web-PrerenderMaintenance");
+                t.setDaemon(true);
+                return t;
+            });
+
+            maintenanceExecutor.scheduleAtFixedRate(() -> {
+                try {
+                    runMaintenanceOnce();
+                } catch (Exception e) {
+                    AE2WebMod.LOGGER.warn("Prerender maintenance failed", e);
+                }
+            }, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+        }
+    }
+
+    public void shutdownMaintenance() {
+        ScheduledExecutorService executor = maintenanceExecutor;
+        maintenanceExecutor = null;
+        if (executor != null) {
+            executor.shutdown();
+        }
+        saveSeen(true);
+    }
+
+    private void runMaintenanceOnce() {
+        initialize();
+
+        int deleted = gcExpiredIcons();
+        if (deleted > 0) {
+            AE2WebMod.LOGGER.info("Prerender GC: deleted {} expired NBT-variant icons", deleted);
+        }
+
+        saveSeen(false);
+    }
+
+    /**
+     * Delete icons that have not been seen for TTL seconds.
+     * Only deletes non-base variants (NBT variants), to keep baseline icons stable for remote-only users.
+     */
+    private int gcExpiredIcons() {
+        int ttlSeconds = AE2WebConfig.getPrerenderGcTtlSeconds();
+        if (ttlSeconds <= 0) {
+            return 0;
+        }
+
+        long now = System.currentTimeMillis();
+        long cutoff = now - (ttlSeconds * 1000L);
+
+        List<String> candidates = new ArrayList<>();
+        for (var entry : lastSeen.entrySet()) {
+            Long ts = entry.getValue();
+            if (ts == null || ts <= 0) {
+                continue;
+            }
+            String iconKey = entry.getKey();
+            if (iconKey == null || iconKey.isBlank()) {
+                continue;
+            }
+            boolean locked = renderingLocks.containsKey(iconKey);
+            boolean baseVariant = isBaseVariant(iconKey);
+            if (!PrerenderUtils.shouldGc(ts, cutoff, locked, baseVariant)) {
+                continue;
+            }
+
+            candidates.add(iconKey);
+        }
+
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+
+        int deleted = 0;
+        boolean translationsChanged = false;
+        boolean tooltipsChanged = false;
+
+        for (String iconKey : candidates) {
+            Long currentSeen = lastSeen.get(iconKey);
+            if (currentSeen == null || currentSeen <= 0) {
+                continue;
+            }
+            boolean locked = renderingLocks.containsKey(iconKey);
+            boolean baseVariant = isBaseVariant(iconKey);
+            if (!PrerenderUtils.shouldGc(currentSeen, cutoff, locked, baseVariant)) {
+                continue;
+            }
+
+            if (deleteIcon(iconKey)) {
+                deleted++;
+            }
+            if (translations.remove(iconKey) != null) {
+                translationsChanged = true;
+            }
+            if (tooltips.remove(iconKey) != null) {
+                tooltipsChanged = true;
+            }
+            lastSeen.remove(iconKey);
+        }
+
+        if (translationsChanged) {
+            saveTranslations();
+        }
+        if (tooltipsChanged) {
+            saveTooltips();
+        }
+        seenDirty = true;
+        saveSeen(false);
+
+        return deleted;
+    }
+
+    private boolean deleteIcon(String iconKey) {
+        existenceCache.remove(iconKey);
+        synchronized (cacheLock) {
+            iconCache.remove(iconKey);
+        }
+
+        Path filePath = getFilePath(iconKey);
+        if (filePath == null) {
+            return false;
+        }
+
+        boolean removed = false;
+        try {
+            removed = Files.deleteIfExists(filePath);
+        } catch (IOException e) {
+            AE2WebMod.LOGGER.debug("Failed to delete icon file: {}", filePath, e);
+        }
+
+        cleanupEmptyParents(filePath);
+        return removed;
+    }
+
+    private void cleanupEmptyParents(Path filePath) {
+        if (filePath == null) {
+            return;
+        }
+
+        Path dir = filePath.getParent();
+        while (dir != null && !dir.equals(storageRoot)) {
+            try (Stream<Path> entries = Files.list(dir)) {
+                if (entries.findAny().isPresent()) {
+                    return;
+                }
+            } catch (IOException e) {
+                return;
+            }
+
+            try {
+                Files.deleteIfExists(dir);
+            } catch (IOException ignored) {
+                return;
+            }
+
+            dir = dir.getParent();
+        }
+    }
+
+    private boolean isBaseVariant(String iconKey) {
+        int at = iconKey.lastIndexOf('@');
+        if (at <= 0) {
+            return true;
+        }
+
+        String idStr = iconKey.substring(0, at);
+        ResourceLocation id = ResourceLocation.tryParse(idStr);
+        if (id == null) {
+            return true;
+        }
+
+        var item = ForgeRegistries.ITEMS.getValue(id);
+        if (item != null) {
+            String base = IconKeyUtils.iconKey(AEItemKey.of(item));
+            return iconKey.equals(base);
+        }
+
+        var fluid = ForgeRegistries.FLUIDS.getValue(id);
+        if (fluid != null && fluid != Fluids.EMPTY) {
+            String base = IconKeyUtils.iconKey(AEFluidKey.of(fluid));
+            return iconKey.equals(base);
+        }
+
+        return true;
     }
 }
