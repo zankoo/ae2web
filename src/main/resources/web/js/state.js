@@ -7,6 +7,7 @@ export const PLACEHOLDER_ICON =
 export const state = {
     currentSearch: '',
     currentFilter: 'all',
+    currentSort: 'amount',
     currentTerminalId: '',
     selectedItem: null,
 
@@ -20,4 +21,3 @@ export const state = {
     inventoryReloadTimer: null,
     lastInventoryEventVersion: null,
 };
-

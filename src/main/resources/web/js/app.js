@@ -2,7 +2,7 @@ import { state } from './state.js';
 import { apiRequest } from './api.js';
 import { debounce } from './utils.js';
 import { bindTerminalSelectHandlers, loadTerminals } from './terminals.js';
-import { bindInventoryClickHandlers, loadInventory, startInventoryEventStream } from './inventory.js';
+import { bindInventoryClickHandlers, loadInventory, resortInventory, startInventoryEventStream } from './inventory.js';
 import { bindCraftModalHandlers } from './craft.js';
 import { bindCpuClickHandlers, loadCPUs } from './cpus.js';
 
@@ -21,6 +21,7 @@ async function initTerminal() {
 
     bindTerminalSelectHandlers();
     bindFilterClickHandlers();
+    bindSortClickHandlers();
     bindQuickActions();
     bindCraftModalHandlers();
     bindInventoryClickHandlers();
@@ -46,6 +47,19 @@ function bindFilterClickHandlers() {
         const filter = btn.dataset.filter;
         if (!filter) return;
         setFilter(filter);
+    });
+}
+
+function bindSortClickHandlers() {
+    const toggle = document.querySelector('.sort-toggle');
+    if (!toggle) return;
+
+    toggle.addEventListener('click', (e) => {
+        const btn = e.target.closest('button.filter-btn');
+        if (!btn || !toggle.contains(btn)) return;
+        const sort = btn.dataset.sort;
+        if (!sort) return;
+        setSort(sort);
     });
 }
 
@@ -116,10 +130,27 @@ function setFilter(filter) {
     state.currentFilter = filter;
     state.lastItemsHash = null;
 
-    document.querySelectorAll('.filter-btn').forEach(btn => {
+    document.querySelectorAll('.filter-toggle .filter-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.filter === filter);
     });
 
     loadInventory();
 }
 
+function setSort(sort) {
+    const normalized = String(sort);
+    if (state.currentSort === normalized) {
+        return;
+    }
+
+    state.currentSort = normalized;
+    state.lastItemsHash = null;
+
+    document.querySelectorAll('.sort-toggle .filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.sort === normalized);
+    });
+
+    if (!resortInventory()) {
+        loadInventory();
+    }
+}

@@ -3,6 +3,7 @@ import { apiRequest } from './api.js';
 import { formatAmount, formatNumber, matchItem } from './utils.js';
 import { openCraftModal } from './craft.js';
 import { createTooltipPositioner } from './tooltipPositioner.js';
+import { sortInventoryItems } from './inventorySort.js';
 
 let iconObserver = null;
 const loadedIcons = new Set();
@@ -200,6 +201,14 @@ export async function loadInventory(options = {}) {
     }
 }
 
+export function resortInventory() {
+    if (state.currentRequestId === 0) {
+        return false;
+    }
+    syncInventory({ items: inventoryItems, total: inventoryItems.length });
+    return true;
+}
+
 function renderEmptyInventory() {
     const grid = document.getElementById('inventory-grid');
     if (!grid) return;
@@ -239,7 +248,7 @@ function syncInventory(data) {
         return;
     }
 
-    inventoryItems = items;
+    inventoryItems = sortInventoryItems(items, state.currentSort);
 
     if (inventorySlotById.size === 0) {
         grid.innerHTML = '';
