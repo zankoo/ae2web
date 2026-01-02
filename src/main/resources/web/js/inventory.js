@@ -4,6 +4,7 @@ import { formatAmount, formatNumber, matchItem } from './utils.js';
 import { openCraftModal } from './craft.js';
 import { createTooltipPositioner } from './tooltipPositioner.js';
 import { sortInventoryItems } from './inventorySort.js';
+import { nextIconRetry } from './iconRetry.js';
 
 let iconObserver = null;
 const loadedIcons = new Set();
@@ -41,14 +42,14 @@ function scheduleIconRetry(img) {
     }
 
     const attempts = Number(img.dataset.retryAttempts || '0');
-    if (attempts >= ICON_RETRY_MAX_ATTEMPTS) {
-        return;
-    }
+    const nextRetry = nextIconRetry(attempts, {
+        baseMs: ICON_RETRY_BASE_MS,
+        maxMs: ICON_RETRY_MAX_MS,
+        maxAttempts: ICON_RETRY_MAX_ATTEMPTS,
+    });
+    img.dataset.retryAttempts = String(nextRetry.attempts);
 
-    const nextAttempts = attempts + 1;
-    img.dataset.retryAttempts = String(nextAttempts);
-
-    const delay = Math.min(ICON_RETRY_BASE_MS * (2 ** (nextAttempts - 1)), ICON_RETRY_MAX_MS);
+    const delay = nextRetry.delayMs;
     const prevTimer = iconRetryTimers.get(img);
     if (prevTimer) {
         clearTimeout(prevTimer);
