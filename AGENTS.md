@@ -41,6 +41,7 @@ npm -C webui run check # svelte-check (TypeScript + Svelte)
 ```
 
 Note: `./gradlew clean build` runs `webuiBuild` (Node download + `npm ci` + `npm run build`) and packages `webui/build/**` into the mod JAR.
+`./gradlew clean build` also runs `webuiTest` (Vitest) via Gradle `check`.
 `npm -C webui run dev` uses the system Node; if you need to change the backend target, edit `webui/vite.config.ts`.
 Offline builds are no longer guaranteed after the SvelteKit migration (need pre-warmed Gradle + npm caches).
 
