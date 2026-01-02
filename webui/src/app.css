@@ -458,6 +458,9 @@ body {
     justify-content: flex-start;
     padding: 2px 1px 1px;
     position: relative;
+    contain: layout paint style;
+    content-visibility: auto;
+    contain-intrinsic-size: 64px 64px;
     cursor: pointer;
     box-shadow: var(--shadow-slot);
     /* Inset shadow */

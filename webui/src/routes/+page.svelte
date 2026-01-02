@@ -16,12 +16,11 @@
 	import { showToast } from '$lib/stores/toast';
 	import { PLACEHOLDER_ICON } from '$lib/constants';
 	import { formatAmount, formatNumber } from '$lib/utils/format';
+	import { computeFlipDuration, type SortMode } from '$lib/utils/flip';
 	import { sortInventoryItems } from '$lib/utils/inventorySort';
 	import { legacyTextToHtml } from '$lib/utils/minecraftText';
 	import { matchItem } from '$lib/utils/pinyin';
 	import { createTooltipPositioner, type TooltipPositioner } from '$lib/utils/tooltipPositioner';
-
-	type SortMode = 'amount' | 'name';
 
 	let online = false;
 
@@ -68,9 +67,11 @@
 	let tooltipLastY = 0;
 	let tooltipHasLastPos = false;
 
+	let flipDuration = 0;
+
 	const requestInventoryReload = debounce(() => {
 		if (document.hidden) return;
-		void loadInventory(true);
+		void loadInventory(sort === 'amount');
 	}, 250);
 
 	const applySearchDebounced = debounce(() => {
@@ -293,10 +294,12 @@
 		void loadInventory(false);
 	}
 
-	function setSort(next: SortMode): void {
+	async function setSort(next: SortMode): Promise<void> {
 		if (sort === next) return;
+		flipDuration = computeFlipDuration(next, visibleItems.length, true);
 		sort = next;
-		void recomputeInventory({ preserveAnchor: sort === 'amount' });
+		await recomputeInventory({ preserveAnchor: next === 'amount' });
+		flipDuration = 0;
 	}
 
 	function executeSearchNow(): void {
@@ -699,7 +702,7 @@
 								data-item-type={item.type}
 								role="button"
 								tabindex="-1"
-								animate:flip={{ duration: sort === 'amount' ? 180 : 0 }}
+								animate:flip={{ duration: flipDuration }}
 								on:click={() => item.craftable && openCraftModal(item)}
 								on:keydown={(e) => {
 									if (e.key === 'Enter' || e.key === ' ') {
