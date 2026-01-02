@@ -4,6 +4,8 @@ Generated: 2026-01-01
 Session: 019b76cd-fd97-78d0-a695-0de5350a7650
 Tokens used: 127,096
 
+> Note (2026-01-02): The legacy vanilla web UI under `src/main/resources/web/` has been removed. Frontend code now lives in `webui/` (SvelteKit SPA). Any references below to `src/main/resources/web/*` are historical.
+
 ## 1) Root Cause Validation
 
 ### Infinite retry loop: mostly correct, but incomplete

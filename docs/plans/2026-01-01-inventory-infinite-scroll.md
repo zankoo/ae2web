@@ -1,5 +1,7 @@
 # Inventory Infinite Scroll (No 3s Full Refresh) Implementation Plan
 
+> Note (2026-01-02): The legacy vanilla web UI under `src/main/resources/web/` has been replaced by the SvelteKit SPA in `webui/`. This plan targets the legacy frontend and should be reworked against `webui/` before reuse.
+
 > **For Codex:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task.
 
 **Goal:** Remove the 3-second full `/api/items` refresh and implement a true infinite-scroll UI that can still display the full inventory snapshot (data volume is controllable), without introducing server-side `page` parameters into the UI contract.
@@ -75,4 +77,3 @@ Changes:
 Verification:
 - Run: `./gradlew build --offline`
 - Expected: `BUILD SUCCESSFUL`
-

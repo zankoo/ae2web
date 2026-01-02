@@ -2,6 +2,8 @@
 
 Scope: full repo review (Java backend + Java client + web frontend). Focus is correctness, concurrency, resource lifecycle, API/UI contract, and subtle failure modes.
 
+> Note (2026-01-02): The legacy vanilla web UI under `src/main/resources/web/` has been removed. Frontend code now lives in `webui/` (SvelteKit SPA). Any references below to `src/main/resources/web/*` are historical.
+
 ---
 
 ## Critical Issues (must fix)

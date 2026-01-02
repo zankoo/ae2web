@@ -1,5 +1,7 @@
 # Taste-Check Improvements Implementation Plan
 
+> Note (2026-01-02): The legacy vanilla web UI under `src/main/resources/web/` has been replaced by the SvelteKit SPA in `webui/`. Any frontend-specific steps in this plan should be adapted to the new SvelteKit codebase.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Apply repo-wide “taste-check” improvements: fix interrupt handling in retries, remove string-based DOM building hot spots, split the web UI into smaller files, and split oversized server handlers while keeping behavior the same.
@@ -107,4 +109,3 @@
 
 **Step 2: Verify**
 - Run: `./gradlew build --offline`
-

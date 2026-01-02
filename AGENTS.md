@@ -117,7 +117,7 @@ Guideline: never use plain `id` or `hashCode()` as a UI key; NBT variants must r
   - Global CSS (ported from legacy): `webui/src/app.css`
   - Build output: `webui/build/` (adapter-static)
 - Packaging: Gradle copies `webui/build/**` into classpath `web/` during `processResources` (see `build.gradle`)
-- Legacy `src/main/resources/web/**` is kept for reference but excluded from the JAR at build time.
+- Legacy vanilla UI under `src/main/resources/web/**` has been removed (it was excluded from the JAR after the migration). Do not add new files there.
 
 Inventory UI behavior:
 - UI renders full inventory snapshot (no pagination).

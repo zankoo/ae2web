@@ -1,5 +1,7 @@
 # Issue: Missing Icons in Frontend Despite Successful Rendering
 
+> Note (2026-01-02): The legacy vanilla web UI under `src/main/resources/web/` has been removed. The frontend is now a SvelteKit SPA in `webui/`. The analysis below references the legacy implementation for historical context.
+
 ## 问题描述
 
 用户报告：所有物品都已渲染完成（服务器状态显示 Missing: 0），但前端仍有大量物品图标不可见，例如：

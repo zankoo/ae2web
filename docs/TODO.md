@@ -6,6 +6,7 @@
 
 ## Completed
 
+- [x] CHORE-2026-2: Remove legacy vanilla web UI resources (`src/main/resources/web/**`) after SvelteKit migration
 - [x] HIGH-2026-1: Scaffold `webui/` SvelteKit SPA project (TS + adapter-static)
 - [x] HIGH-2026-2: Port Web UI layout/CSS/assets into SvelteKit (no CDN)
 - [x] HIGH-2026-3: Implement token store + typed API client + DTOs

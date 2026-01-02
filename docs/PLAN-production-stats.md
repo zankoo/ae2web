@@ -1,5 +1,7 @@
 # 产量统计功能规划
 
+> Note (2026-01-02): The web UI has been migrated to `webui/` (SvelteKit SPA). Any legacy references to `src/main/resources/web/*` in this plan should be translated to the new SvelteKit codebase before implementation.
+
 > 状态: 待实现
 > 优先级: 中
 > 预计复杂度: 中等

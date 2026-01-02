@@ -1,5 +1,7 @@
 # NBT 变体物品图标修复计划
 
+> Note (2026-01-02): The legacy vanilla web UI under `src/main/resources/web/` has been removed. The frontend is now in `webui/` (SvelteKit SPA). Any references below to `src/main/resources/web/*` are historical.
+
 ## 问题描述
 
 当前预渲染系统使用 `ResourceLocation`（如 `gtceu:material_basic_core`）作为存储键，不区分 NBT 变体。导致具有相同 ID 但不同 NBT 的物品（如不同材料的基础核心）显示相同图标。
