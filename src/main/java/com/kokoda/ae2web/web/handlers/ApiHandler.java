@@ -164,12 +164,17 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         if (lower.endsWith(".html")) return "text/html";
         if (lower.endsWith(".css")) return "text/css";
         if (lower.endsWith(".js")) return "application/javascript";
+        if (lower.endsWith(".map")) return "application/json";
         if (lower.endsWith(".json")) return "application/json";
+        if (lower.endsWith(".webmanifest")) return "application/manifest+json";
+        if (lower.endsWith(".txt")) return "text/plain";
         if (lower.endsWith(".svg")) return "image/svg+xml";
         if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".webp")) return "image/webp";
         if (lower.endsWith(".woff2")) return "font/woff2";
         if (lower.endsWith(".woff")) return "font/woff";
         if (lower.endsWith(".ttf")) return "font/ttf";
+        if (lower.endsWith(".wasm")) return "application/wasm";
         if (lower.endsWith(".ico")) return "image/x-icon";
         return "application/octet-stream";
     }

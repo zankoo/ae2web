@@ -39,7 +39,7 @@ class ApiHandlerTest {
         try {
             assertThat(resp.status()).isEqualTo(HttpResponseStatus.OK);
             assertThat(resp.headers().get(HttpHeaderNames.CONTENT_TYPE)).contains("text/html");
-            assertThat(resp.content().toString(CharsetUtil.UTF_8)).contains("<!DOCTYPE html>");
+            assertThat(resp.content().toString(CharsetUtil.UTF_8)).containsIgnoringCase("<!doctype html>");
         } finally {
             ReferenceCountUtil.release(resp);
         }

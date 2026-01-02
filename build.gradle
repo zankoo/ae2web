@@ -1,8 +1,11 @@
+import com.github.gradle.node.npm.task.NpmTask
+
 plugins {
     id 'eclipse'
     id 'idea'
     id 'maven-publish'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'com.github.node-gradle.node' version '7.1.0'
 }
 
 version = mod_version
@@ -53,6 +56,27 @@ minecraft {
 }
 
 sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+node {
+    download = true
+    version = '24.12.0'
+    npmInstallCommand = 'ci'
+    nodeProjectDir = file("${project.projectDir}/webui")
+    workDir = file("${project.projectDir}/.gradle/nodejs")
+    npmWorkDir = file("${project.projectDir}/.gradle/npm")
+}
+
+tasks.register('webuiBuild', NpmTask) {
+    dependsOn(tasks.named('npmInstall'))
+    workingDir = file("${project.projectDir}/webui")
+    args = ['run', 'build']
+
+    inputs.file(file("${project.projectDir}/webui/package.json"))
+    inputs.file(file("${project.projectDir}/webui/package-lock.json"))
+    inputs.dir(file("${project.projectDir}/webui/src"))
+    inputs.dir(file("${project.projectDir}/webui/static"))
+    outputs.dir(file("${project.projectDir}/webui/build"))
+}
 
 repositories {
     // 国内镜像加速
@@ -113,6 +137,12 @@ dependencies {
 jarJar.enable()
 
 tasks.named('processResources', ProcessResources).configure {
+    dependsOn(tasks.named('webuiBuild'))
+    exclude('web/**')
+    from("${project.projectDir}/webui/build") {
+        into 'web'
+    }
+
     var replaceProperties = [
             minecraft_version   : minecraft_version,
             minecraft_version_range: minecraft_version_range,

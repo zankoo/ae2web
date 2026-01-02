@@ -6,6 +6,14 @@
 
 ## Completed
 
+- [x] HIGH-2026-1: Scaffold `webui/` SvelteKit SPA project (TS + adapter-static)
+- [x] HIGH-2026-2: Port Web UI layout/CSS/assets into SvelteKit (no CDN)
+- [x] HIGH-2026-3: Implement token store + typed API client + DTOs
+- [x] HIGH-2026-4: Implement terminals + status polling + selection persistence
+- [x] HIGH-2026-5: Implement inventory view (filter/search/sort/SSE/icons/tooltips)
+- [x] HIGH-2026-6: Implement craft modal + CPUs panel + toast system
+- [x] HIGH-2026-7: Integrate Gradle Node build to package `webui/build` into `web/`
+- [x] MED-2026-1: Add Vitest unit tests for core frontend utilities
 - [x] MINOR-8: Add inventory sorting (amount/name)
 - [x] FIX-23: Auto refresh missing icons when prerender completes (retry continues)
 - [x] FIX-24: Animate inventory reorder when sorting by amount
