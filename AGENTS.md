@@ -53,6 +53,7 @@ Offline builds are no longer guaranteed after the SvelteKit migration (need pre-
 - Use Testcontainers when a real dependency is required (MySQL/Redis/Kafka/etc).
 - After completing each task, run unit tests: `./gradlew test` (or `./gradlew clean build` for full verification, including frontend build).
 - If the change touches `webui/`, also run: `npm -C webui test` (and ideally `npm -C webui run check`).
+- Frontend unit tests are colocated under `webui/src/lib/**/*.test.ts` (Vitest); `webui/src/tests/setup.ts` is test setup.
 
 If Gradle fails early with a ForgeGradle certificate pinning error like:
 

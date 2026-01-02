@@ -1,38 +1,41 @@
-# sv
+# AE2Web Web UI (SvelteKit SPA)
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+This folder (`webui/`) contains the source for the in-mod Web UI.
+The Minecraft mod packages the built static site into the JAR under classpath `web/` and serves it from the embedded Netty HTTP server.
 
-## Creating a project
+## Key Paths
 
-If you're seeing this, you've probably already done this step. Congrats!
+- Source code: `webui/src/`
+- Build output (static site): `webui/build/`
+- Packaged location in JAR: `web/**`
 
-```sh
-# create a new project in the current directory
-npx sv create
+## Dev Workflow
 
-# create a new project in my-app
-npx sv create my-app
+1) Start the mod (Netty backend):
+
+```bash
+./gradlew runClient
 ```
 
-## Developing
+2) Start Vite dev server (with `/api` proxy to the mod backend):
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+```bash
+npm -C webui ci
+npm -C webui run dev
 ```
 
-## Building
+If your backend is not on `127.0.0.1:8080`, update the proxy target in `webui/vite.config.ts`.
 
-To create a production version of your app:
+## Build / Package
 
-```sh
-npm run build
-```
+- Build only the Web UI:
+  - `./gradlew webuiBuild` (uses Gradle-pinned Node + `npm ci` + `npm run build`)
+- Full mod build (includes Web UI build + packaging):
+  - `./gradlew clean build`
 
-You can preview the production build with `npm run preview`.
+## Tests
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+- Run unit tests:
+  - `npm -C webui test`
+- Tests are colocated next to the code under `webui/src/lib/**/*.test.ts`
+- Test setup lives in `webui/src/tests/setup.ts`
