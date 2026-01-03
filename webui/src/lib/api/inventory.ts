@@ -1,5 +1,5 @@
 import { apiJson, withTokenQuery } from '$lib/api/client';
-import type { InventoryResponse } from '$lib/api/types';
+import type { InventoryItem, InventoryResponse } from '$lib/api/types';
 
 export type InventoryFilter = 'all' | 'items' | 'fluids';
 
@@ -14,11 +14,29 @@ export async function fetchInventory(
 	return apiJson<InventoryResponse>(`/api/items?${params}`);
 }
 
-export type InventorySseMessage = { terminalId?: string; version?: number };
+export type InventorySseHelloMessage = { terminalId?: string; version?: number };
+
+export type InventorySseSnapshotMessage = {
+	terminalId?: string;
+	version?: number;
+	items?: InventoryItem[];
+	total?: number;
+};
+
+export type InventorySseDeltaUpdate = { uniqueId: string; amount: number; craftable: boolean; name?: string };
+
+export type InventorySseDeltaMessage = {
+	terminalId?: string;
+	version?: number;
+	added?: InventoryItem[];
+	updated?: InventorySseDeltaUpdate[];
+	removed?: string[];
+};
 
 export type InventorySseHandlers = {
-	onHello?: (msg: InventorySseMessage) => void;
-	onInventory?: (msg: InventorySseMessage) => void;
+	onHello?: (msg: InventorySseHelloMessage) => void;
+	onSnapshot?: (msg: InventorySseSnapshotMessage) => void;
+	onDelta?: (msg: InventorySseDeltaMessage) => void;
 	onError?: (evt: Event) => void;
 };
 
@@ -28,19 +46,28 @@ export function openInventorySse(terminalId: string, handlers: InventorySseHandl
 
 	es.addEventListener('hello', (evt) => {
 		try {
-			const msg = JSON.parse((evt as MessageEvent).data) as InventorySseMessage;
+			const msg = JSON.parse((evt as MessageEvent).data) as InventorySseHelloMessage;
 			handlers.onHello?.(msg);
 		} catch {
 			handlers.onHello?.({});
 		}
 	});
 
-	es.addEventListener('inventory', (evt) => {
+	es.addEventListener('snapshot', (evt) => {
 		try {
-			const msg = JSON.parse((evt as MessageEvent).data) as InventorySseMessage;
-			handlers.onInventory?.(msg);
+			const msg = JSON.parse((evt as MessageEvent).data) as InventorySseSnapshotMessage;
+			handlers.onSnapshot?.(msg);
 		} catch {
-			handlers.onInventory?.({});
+			handlers.onSnapshot?.({});
+		}
+	});
+
+	es.addEventListener('delta', (evt) => {
+		try {
+			const msg = JSON.parse((evt as MessageEvent).data) as InventorySseDeltaMessage;
+			handlers.onDelta?.(msg);
+		} catch {
+			handlers.onDelta?.({});
 		}
 	});
 
@@ -50,4 +77,3 @@ export function openInventorySse(terminalId: string, handlers: InventorySseHandl
 
 	return es;
 }
-

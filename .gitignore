@@ -2,6 +2,7 @@
 .gradle/
 .gradle-user-home/
 build/
+.tmp/
 !gradle/wrapper/gradle-wrapper.jar
 
 # IDE

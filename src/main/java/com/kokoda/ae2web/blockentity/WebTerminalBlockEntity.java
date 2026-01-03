@@ -2,6 +2,8 @@ package com.kokoda.ae2web.blockentity;
 
 import appeng.api.networking.*;
 import appeng.api.networking.crafting.ICraftingService;
+import appeng.api.networking.crafting.ICraftingWatcherNode;
+import appeng.api.networking.storage.IStorageWatcherNode;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
@@ -32,7 +34,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 
 public class WebTerminalBlockEntity extends BlockEntity
-        implements IGridNodeListener<WebTerminalBlockEntity>, IInWorldGridNodeHost, MenuProvider {
+        implements IGridNodeListener<WebTerminalBlockEntity>, IInWorldGridNodeHost, MenuProvider,
+        IStorageWatcherNode, ICraftingWatcherNode {
 
     private static final Capability<IInWorldGridNodeHost> IN_WORLD_GRID_NODE_HOST_CAPABILITY =
             CapabilityManager.get(new CapabilityToken<>() {
@@ -43,10 +46,8 @@ public class WebTerminalBlockEntity extends BlockEntity
     private String customName = "";
     private boolean isConnected = false;
     private final LazyOptional<IInWorldGridNodeHost> inWorldGridNodeHostCapability = LazyOptional.of(() -> this);
-
-    private static final int INVENTORY_CHANGE_CHECK_INTERVAL_TICKS = 10;
-    private int inventoryChangeCheckCountdown = INVENTORY_CHANGE_CHECK_INTERVAL_TICKS;
-    private long lastInventoryHash = 0L;
+    private final Set<IStackWatcher> stackWatchers = new HashSet<>();
+    private boolean watchingAll = false;
 
     public WebTerminalBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.WEB_TERMINAL.get(), pos, state);
@@ -70,54 +71,76 @@ public class WebTerminalBlockEntity extends BlockEntity
                 AE2WebMod.LOGGER.info("Web Terminal {} connected to ME network at {}", terminalId, worldPosition);
             } else {
                 WebServer.getInstance().unregisterTerminal(this);
+                setWatchingAll(false);
                 AE2WebMod.LOGGER.info("Web Terminal {} disconnected from ME network", terminalId);
             }
         }
 
         if (!isConnected) {
-            inventoryChangeCheckCountdown = INVENTORY_CHANGE_CHECK_INTERVAL_TICKS;
             return;
         }
 
-        if (!WebServer.getInstance().hasInventorySubscribers(terminalId)) {
+        boolean hasSubscribers = WebServer.getInstance().hasInventorySubscribers(terminalId);
+        setWatchingAll(hasSubscribers);
+    }
+
+    private void setWatchingAll(boolean enabled) {
+        if (watchingAll == enabled) {
             return;
         }
-
-        inventoryChangeCheckCountdown--;
-        if (inventoryChangeCheckCountdown > 0) {
-            return;
-        }
-        inventoryChangeCheckCountdown = INVENTORY_CHANGE_CHECK_INTERVAL_TICKS;
-
-        try {
-            var storageService = mainNode.getGrid().getStorageService();
-            KeyCounter availableStacks = storageService.getCachedInventory();
-
-            long hash = 0L;
-            for (var entry : availableStacks) {
-                long amount = entry.getLongValue();
-                if (amount <= 0) continue;
-
-                // Order-independent fingerprint to avoid spurious changes due to iteration ordering.
-                // HashCode collisions are acceptable here (we only need a cheap "changed?" signal).
-                long keyHash = entry.getKey().hashCode();
-                long entryHash = mix64(keyHash) ^ mix64(amount);
-                hash ^= entryHash;
+        watchingAll = enabled;
+        for (IStackWatcher watcher : stackWatchers) {
+            try {
+                watcher.setWatchAll(enabled);
+            } catch (Exception e) {
+                AE2WebMod.LOGGER.debug("Failed to update stack watcher for terminal {}", terminalId, e);
             }
-
-            if (hash != lastInventoryHash) {
-                lastInventoryHash = hash;
-                WebServer.getInstance().notifyInventoryChanged(terminalId);
-            }
-        } catch (Exception e) {
-            AE2WebMod.LOGGER.debug("Inventory change check failed for terminal {}", terminalId, e);
         }
     }
 
-    private static long mix64(long z) {
-        z = (z ^ (z >>> 33)) * 0xff51afd7ed558ccdL;
-        z = (z ^ (z >>> 33)) * 0xc4ceb9fe1a85ec53L;
-        return z ^ (z >>> 33);
+    @Override
+    public void updateWatcher(IStackWatcher newWatcher) {
+        if (newWatcher == null) {
+            return;
+        }
+        stackWatchers.add(newWatcher);
+        newWatcher.setWatchAll(watchingAll);
+    }
+
+    @Override
+    public void onStackChange(AEKey what, long amount) {
+        if (what == null) {
+            return;
+        }
+        if (!watchingAll) {
+            return;
+        }
+        WebServer.getInstance().queueInventoryDelta(terminalId, what, amount, null);
+    }
+
+    @Override
+    public void onRequestChange(AEKey what) {
+        // Ignore crafting request updates for the web inventory view.
+    }
+
+    @Override
+    public void onCraftableChange(AEKey what) {
+        if (what == null) {
+            return;
+        }
+        if (!watchingAll) {
+            return;
+        }
+
+        boolean craftable = false;
+        try {
+            ICraftingService service = getCraftingService();
+            craftable = service != null && service.isCraftable(what);
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.debug("Failed to resolve craftable status for terminal {}", terminalId, e);
+        }
+
+        WebServer.getInstance().queueInventoryDelta(terminalId, what, null, craftable);
     }
 
     @Override
@@ -140,7 +163,9 @@ public class WebTerminalBlockEntity extends BlockEntity
                     .setInWorldNode(true)
                     .setFlags(GridFlags.REQUIRE_CHANNEL)
                     .setIdlePowerUsage(1.0)
-                    .setVisualRepresentation(ModBlocks.WEB_TERMINAL.get());
+                    .setVisualRepresentation(ModBlocks.WEB_TERMINAL.get())
+                    .addService(IStorageWatcherNode.class, this)
+                    .addService(ICraftingWatcherNode.class, this);
             
             mainNode.create(level, worldPosition);
 
@@ -292,6 +317,8 @@ public class WebTerminalBlockEntity extends BlockEntity
             mainNode.destroy();
             mainNode = null;
         }
+        stackWatchers.clear();
+        watchingAll = false;
         WebServer.getInstance().unregisterTerminal(this);
     }
 

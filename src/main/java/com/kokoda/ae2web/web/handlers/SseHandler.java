@@ -1,9 +1,11 @@
 package com.kokoda.ae2web.web.handlers;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import com.kokoda.ae2web.web.WebServer;
+import com.kokoda.ae2web.web.dto.InventoryItemDTO;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -16,6 +18,7 @@ import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import static com.kokoda.ae2web.web.handlers.HandlerUtils.scheduleOnServerThread;
 import static com.kokoda.ae2web.web.handlers.HandlerUtils.getFirstParam;
 
 /**
@@ -24,6 +27,7 @@ import static com.kokoda.ae2web.web.handlers.HandlerUtils.getFirstParam;
 public final class SseHandler {
     private static final AttributeKey<ScheduledFuture<?>> KEEPALIVE_TASK =
             AttributeKey.valueOf("ae2web.sse.keepalive");
+    private static final Gson SSE_GSON = new Gson();
 
     public static final AttributeKey<String> SUBSCRIBED_TERMINAL =
             AttributeKey.valueOf("ae2web.sse.terminalId");
@@ -61,10 +65,8 @@ public final class SseHandler {
         response.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
         ctx.writeAndFlush(response);
 
-        // Initial hello + current version
-        long version = WebServer.getInstance().getInventoryVersion(terminalId);
         writeSse(channel, "retry: 2000\n");
-        writeHello(channel, terminalId, version);
+        scheduleOnServerThread(() -> WebServer.getInstance().sendInventorySnapshot(channel, terminalId));
 
         // Keepalive comments so proxies don't kill the connection.
         ScheduledFuture<?> keepalive = ctx.executor().scheduleAtFixedRate(
@@ -109,11 +111,42 @@ public final class SseHandler {
                 HandlerUtils.errorJson("Method not allowed"), headers);
     }
 
-    private static void writeHello(Channel channel, String terminalId, long version) {
+    public static void writeHelloEvent(Channel channel, String terminalId, long version) {
         JsonObject data = new JsonObject();
         data.addProperty("terminalId", terminalId);
         data.addProperty("version", version);
         writeEvent(channel, "hello", data.toString());
+    }
+
+    public static void writeInventorySnapshotEvent(Channel channel, String terminalId, long version, List<InventoryItemDTO> items) {
+        if (channel == null || !channel.isActive()) {
+            return;
+        }
+
+        String subscribed = channel.attr(SUBSCRIBED_TERMINAL).get();
+        if (subscribed == null || !subscribed.equals(terminalId)) {
+            return;
+        }
+
+        JsonObject data = new JsonObject();
+        data.addProperty("terminalId", terminalId);
+        data.addProperty("version", version);
+        data.add("items", SSE_GSON.toJsonTree(items));
+        data.addProperty("total", items == null ? 0 : items.size());
+        writeEvent(channel, "snapshot", data.toString());
+    }
+
+    public static void writeInventoryDeltaEvent(Channel channel, String terminalId, String dataJson) {
+        if (channel == null || !channel.isActive()) {
+            return;
+        }
+
+        String subscribed = channel.attr(SUBSCRIBED_TERMINAL).get();
+        if (subscribed == null || !subscribed.equals(terminalId)) {
+            return;
+        }
+
+        writeEvent(channel, "delta", dataJson);
     }
 
     public static void writeInventoryEvent(Channel channel, String terminalId, long version) {
@@ -156,4 +189,3 @@ public final class SseHandler {
         }
     }
 }
-

@@ -94,6 +94,9 @@ public final class PrerenderUploadHandler {
                             return;
                         }
                         if (saved != null && saved) {
+                            if (nameFinal != null && !nameFinal.isBlank()) {
+                                scheduleOnServerThread(() -> WebServer.getInstance().queueInventoryNameRefresh(itemId, nameFinal));
+                            }
                             JsonObject response = new JsonObject();
                             response.addProperty("status", "saved");
                             response.addProperty("itemId", itemId);

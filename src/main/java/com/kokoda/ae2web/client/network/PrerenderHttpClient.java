@@ -12,6 +12,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -71,8 +72,20 @@ public class PrerenderHttpClient {
      * Retries on 5xx errors and network failures.
      */
     public CompletableFuture<List<MissingIconItem>> fetchMissingIcons(String serverUrl, int limit) {
+        return fetchMissingIcons(serverUrl, limit, null);
+    }
+
+    /**
+     * Fetch missing icons from server with a specific discovery scope.
+     *
+     * @param scope active|registry|all (null/blank = default active)
+     */
+    public CompletableFuture<List<MissingIconItem>> fetchMissingIcons(String serverUrl, int limit, String scope) {
         return CompletableFuture.supplyAsync(() -> {
             String url = serverUrl + "/api/prerender/missing?limit=" + limit;
+            if (scope != null && !scope.isBlank()) {
+                url += "&scope=" + URLEncoder.encode(scope, StandardCharsets.UTF_8);
+            }
 
             for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
                 HttpURLConnection conn = null;

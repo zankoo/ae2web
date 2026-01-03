@@ -4,8 +4,13 @@
 
 ## In Progress
 
+
 ## Completed
 
+- [x] HIGH-2026-3: 首次使用时（prerender 目录为空）自动全量申请预渲染（避免必须滚动才逐步补齐）
+- [x] FIX-26: 预渲染上传完成后自动刷新物品/流体名称（不需要手动刷新页面）
+- [x] FIX-25: Defer SSE-driven inventory reload while scrolling (avoid main-thread jank) and only preserve anchor when reorder happens
+- [x] MINOR-9: Make inventory updates truly event-driven (AE2 stack watchers → SSE snapshot+delta; frontend applies incremental patches)
 - [x] CHORE-2026-2: Remove legacy vanilla web UI resources (`src/main/resources/web/**`) after SvelteKit migration
 - [x] HIGH-2026-1: Scaffold `webui/` SvelteKit SPA project (TS + adapter-static)
 - [x] HIGH-2026-2: Port Web UI layout/CSS/assets into SvelteKit (no CDN)

@@ -38,6 +38,7 @@ public class PrerenderTrigger {
     private static final int DEFAULT_FETCH_LIMIT = 2000; // Keep payload sizes bounded
     private static final int ACTIVE_POLL_SECONDS = 5;
     private static final int IDLE_POLL_SECONDS = 15;
+    private static final int BOOTSTRAP_POLL_SECONDS = 1;
 
     private static final int MAX_FAILURES_PER_ICONKEY = 5;
 
@@ -49,6 +50,9 @@ public class PrerenderTrigger {
 
     private static volatile String serverUrl = null;
     private static volatile boolean pollingEnabled = false;
+    private static volatile boolean bootstrapChecked = false;
+    private static volatile boolean bootstrapAll = false;
+    private static volatile boolean bootstrapNotified = false;
 
     @SubscribeEvent
     public static void onPlayerJoin(ClientPlayerNetworkEvent.LoggingIn event) {
@@ -84,6 +88,9 @@ public class PrerenderTrigger {
 
         pollingEnabled = true;
         retryState.clear();
+        bootstrapChecked = false;
+        bootstrapAll = false;
+        bootstrapNotified = false;
         AE2WebMod.LOGGER.info("Player joined, will start prerender polling in {} seconds (serverUrl={})",
                 JOIN_DELAY_SECONDS, serverUrl);
 
@@ -94,6 +101,9 @@ public class PrerenderTrigger {
     public static void onPlayerLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         pollingEnabled = false;
         serverUrl = null;
+        bootstrapChecked = false;
+        bootstrapAll = false;
+        bootstrapNotified = false;
 
         // Cancel any ongoing rendering
         RenderScheduler scheduler = RenderScheduler.getInstance();
@@ -211,13 +221,42 @@ public class PrerenderTrigger {
         int fetchLimit = configMax <= 0 ? DEFAULT_FETCH_LIMIT : Math.min(DEFAULT_FETCH_LIMIT, configMax);
 
         PrerenderHttpClient client = PrerenderHttpClient.getInstance();
-        client.fetchMissingIcons(targetServerUrl, fetchLimit)
-                .thenCompose(missingItems -> {
+        CompletableFuture<List<PrerenderHttpClient.MissingIconItem>> missingFuture;
+        if (!bootstrapChecked) {
+            bootstrapChecked = true;
+            missingFuture = client.getStats(targetServerUrl)
+                    .thenCompose(stats -> {
+                        if (!pollingEnabled || !targetServerUrl.equals(serverUrl)) {
+                            return CompletableFuture.completedFuture(List.of());
+                        }
+
+                        Integer renderedTotal = stats.get("renderedTotalCount");
+                        bootstrapAll = renderedTotal != null && renderedTotal <= 0;
+                        if (bootstrapAll && !bootstrapNotified) {
+                            bootstrapNotified = true;
+                            notifyBootstrap();
+                        }
+
+                        if (bootstrapAll) {
+                            return client.fetchMissingIcons(targetServerUrl, DEFAULT_FETCH_LIMIT, "all");
+                        }
+                        return client.fetchMissingIcons(targetServerUrl, fetchLimit);
+                    });
+        } else if (bootstrapAll) {
+            missingFuture = client.fetchMissingIcons(targetServerUrl, DEFAULT_FETCH_LIMIT, "all");
+        } else {
+            missingFuture = client.fetchMissingIcons(targetServerUrl, fetchLimit);
+        }
+
+        missingFuture.thenCompose(missingItems -> {
                     if (!pollingEnabled || !targetServerUrl.equals(serverUrl)) {
                         return CompletableFuture.completedFuture(null);
                     }
 
                     if (missingItems.isEmpty()) {
+                        if (bootstrapAll) {
+                            bootstrapAll = false;
+                        }
                         schedulePoll(targetServerUrl, IDLE_POLL_SECONDS);
                         return CompletableFuture.completedFuture(null);
                     }
@@ -232,7 +271,7 @@ public class PrerenderTrigger {
 
                     return processBatchedClaimsSequential(new ArrayList<>(eligible), targetServerUrl, client)
                             .thenAccept(PrerenderTrigger::notifyPlayerComplete)
-                            .thenRun(() -> schedulePoll(targetServerUrl, ACTIVE_POLL_SECONDS));
+                            .thenRun(() -> schedulePoll(targetServerUrl, bootstrapAll ? BOOTSTRAP_POLL_SECONDS : ACTIVE_POLL_SECONDS));
                 })
                 .exceptionally(e -> {
                     AE2WebMod.LOGGER.debug("Prerender poll failed: {}", e.getMessage());
@@ -329,6 +368,19 @@ public class PrerenderTrigger {
                 player.displayClientMessage(
                         Component.literal("[AE2Web] Rendered " + count + " item icons"),
                         true
+                );
+            });
+        }
+    }
+
+    private static void notifyBootstrap() {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player != null) {
+            mc.execute(() -> {
+                player.displayClientMessage(
+                        Component.literal("[AE2Web] Detected empty prerender cache. Bootstrapping full icon render..."),
+                        false
                 );
             });
         }

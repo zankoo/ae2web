@@ -7,6 +7,7 @@ import appeng.api.stacks.AEKey;
 import com.kokoda.ae2web.util.IconKeyUtils;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity.KeyFilter;
+import com.kokoda.ae2web.web.inventory.InventoryNameUtils;
 import com.kokoda.ae2web.web.dto.FluidStackDTO;
 import com.kokoda.ae2web.web.dto.ItemStackDTO;
 import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
@@ -113,10 +114,10 @@ public final class InventoryHandler {
 
             if (key instanceof AEItemKey itemKey) {
                 translationKey = itemKey.getItem().getDescriptionId();
-                name = getTranslatedName(itemKey, storage);
+                name = InventoryNameUtils.getTranslatedName(itemKey, storage);
             } else if (key instanceof AEFluidKey fluidKey) {
                 translationKey = fluidKey.getFluid().getFluidType().getDescriptionId();
-                name = getFluidName(fluidKey, storage);
+                name = InventoryNameUtils.getFluidName(fluidKey, storage);
             } else {
                 continue;
             }
@@ -142,11 +143,11 @@ public final class InventoryHandler {
             if (key instanceof AEItemKey itemKey) {
                 if (keyFilter == KeyFilter.FLUIDS) continue;
                 translationKey = itemKey.getItem().getDescriptionId();
-                name = getTranslatedName(itemKey, storage);
+                name = InventoryNameUtils.getTranslatedName(itemKey, storage);
             } else if (key instanceof AEFluidKey fluidKey) {
                 if (keyFilter == KeyFilter.ITEMS) continue;
                 translationKey = fluidKey.getFluid().getFluidType().getDescriptionId();
-                name = getFluidName(fluidKey, storage);
+                name = InventoryNameUtils.getFluidName(fluidKey, storage);
             } else {
                 continue;
             }
@@ -155,39 +156,6 @@ public final class InventoryHandler {
                 result.add(new FilteredEntry(key, 0, name, translationKey, true));
             }
         }
-    }
-
-    private static String getTranslatedName(AEItemKey itemKey, PrerenderStorageService storage) {
-        // Try to use cached translation from prerender (client-side language)
-        String iconKey = IconKeyUtils.iconKey(itemKey);
-        String cached = storage.getTranslation(iconKey);
-        if (cached != null && !cached.isBlank()) {
-            return stripMinecraftFormatting(cached);
-        }
-        // Fallback to server-side name (may be in server's language)
-        return stripMinecraftFormatting(itemKey.getDisplayName().getString());
-    }
-
-    private static String getFluidName(AEFluidKey fluidKey, PrerenderStorageService storage) {
-        // Try to use cached translation from prerender (client-side language)
-        String iconKey = IconKeyUtils.iconKey(fluidKey);
-        String cached = storage.getTranslation(iconKey);
-        if (cached != null && !cached.isBlank()) {
-            return stripMinecraftFormatting(cached);
-        }
-        // Fallback to server-side name (may be in server's language)
-        return stripMinecraftFormatting(fluidKey.getDisplayName().getString());
-    }
-
-    /**
-     * Remove Minecraft formatting codes (§ followed by color/format character).
-     * Examples: "256安§4UHV§r激光源仓" -> "256安UHV激光源仓"
-     */
-    private static String stripMinecraftFormatting(String text) {
-        if (text == null) return null;
-        // §0-§9, §a-§f: colors, §k: obfuscated, §l: bold, §m: strikethrough,
-        // §n: underline, §o: italic, §r: reset (case insensitive)
-        return text.replaceAll("§[0-9a-fk-orA-FK-OR]", "");
     }
 
     private static boolean matchesSearch(String name, String id, String searchLower) {

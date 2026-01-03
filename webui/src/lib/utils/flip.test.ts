@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { computeFlipDuration } from '$lib/utils/flip';
 
 describe('computeFlipDuration', () => {
-	it('enables flip for user-triggered amount sort under max items', () => {
+	it('enables flip for amount sort under max items when enabled', () => {
 		expect(computeFlipDuration('amount', 100, true)).toBe(180);
 	});
 
-	it('disables flip when not user-triggered', () => {
+	it('disables flip when not enabled', () => {
 		expect(computeFlipDuration('amount', 100, false)).toBe(0);
 	});
 
@@ -19,4 +19,3 @@ describe('computeFlipDuration', () => {
 		expect(computeFlipDuration('amount', 500, true, { maxItems: 400 })).toBe(0);
 	});
 });
-

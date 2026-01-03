@@ -52,6 +52,9 @@ export type CpuJobStatusDto = {
 	crafting?: GenericStackDto;
 	totalItems: number;
 	progress: number;
+	outputTotal?: number;
+	outputDone?: number;
+	outputRemaining?: number;
 	elapsedTimeNanos: number;
 };
 
@@ -90,4 +93,3 @@ export type TooltipResponse = {
 	iconKey: string;
 	tooltip: string[];
 };
-

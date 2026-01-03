@@ -1,12 +1,11 @@
 <script lang="ts">
-	import { flip } from 'svelte/animate';
 	import { onDestroy, onMount, tick } from 'svelte';
 
 	import debounce from 'lodash-es/debounce';
 
 	import { fetchCpus } from '$lib/api/cpus';
 	import { submitCraft } from '$lib/api/craft';
-	import { fetchInventory, openInventorySse, type InventoryFilter } from '$lib/api/inventory';
+		import { openInventorySse, type InventoryFilter } from '$lib/api/inventory';
 	import { fetchTooltip } from '$lib/api/prerender';
 	import { fetchStatus } from '$lib/api/status';
 	import { fetchTerminals } from '$lib/api/terminals';
@@ -17,6 +16,7 @@
 	import { PLACEHOLDER_ICON } from '$lib/constants';
 	import { formatAmount, formatNumber } from '$lib/utils/format';
 	import { computeFlipDuration, type SortMode } from '$lib/utils/flip';
+	import { playFlipAnimation, type FlipPosition } from '$lib/utils/flipAnimation';
 	import { sortInventoryItems } from '$lib/utils/inventorySort';
 	import { legacyTextToHtml } from '$lib/utils/minecraftText';
 	import { matchItem } from '$lib/utils/pinyin';
@@ -40,16 +40,23 @@
 	let typeCount = 0;
 	let connectedTerminals: TerminalInfo[] = [];
 	let cpuCount = 0;
-	let statusText = 'OFFLINE';
+		let statusText = 'OFFLINE';
 
-	let inventoryScrollEl: HTMLDivElement | null = null;
-	let inventoryGridEl: HTMLDivElement | null = null;
-	let inventoryRequestId = 0;
+		let inventoryScrollEl: HTMLDivElement | null = null;
+		let inventoryGridEl: HTMLDivElement | null = null;
+		let inventoryEventSource: EventSource | null = null;
+		let lastInventoryEventVersion: number | null = null;
 
-	let inventoryEventSource: EventSource | null = null;
-	let lastInventoryEventVersion: number | null = null;
+		let inventoryState = new Map<string, InventoryItem>();
+		let inventoryStateDirty = false;
+		let inventoryStateAnimate = false;
+		let inventoryStateFlushInFlight = false;
+		let inventoryStateFlushPending = false;
 
-	let cpus: CpuDto[] = [];
+		let inventoryScrollActive = false;
+		let inventoryScrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+		let cpus: CpuDto[] = [];
 
 	let craftOpen = false;
 	let craftItem: InventoryItem | null = null;
@@ -67,16 +74,64 @@
 	let tooltipLastY = 0;
 	let tooltipHasLastPos = false;
 
-	let flipDuration = 0;
+		function prefersReducedMotion(): boolean {
+			return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
+		}
 
-	const requestInventoryReload = debounce(() => {
-		if (document.hidden) return;
-		void loadInventory(sort === 'amount');
-	}, 250);
+		async function flushInventoryState(): Promise<void> {
+			if (document.hidden) return;
+			if (!inventoryStateDirty) return;
+			if (inventoryScrollActive) {
+				inventoryStateFlushPending = true;
+				return;
+			}
+			if (inventoryStateFlushInFlight) {
+				inventoryStateFlushPending = true;
+				return;
+			}
 
-	const applySearchDebounced = debounce(() => {
-		searchTerm = searchValue.trim();
-		void recomputeInventory({ preserveAnchor: false });
+			inventoryStateFlushInFlight = true;
+			try {
+				const nextItems = Array.from(inventoryState.values());
+				const nextVisible = computeVisible(nextItems);
+
+				const positionChanged = sort === 'amount' && hasPositionChanged(visibleItems, nextVisible);
+				const preserveAnchor = positionChanged;
+				let duration = 0;
+				if (inventoryStateAnimate && positionChanged) {
+					duration = computeFlipDuration(sort, 0, true, { maxItems: Number.POSITIVE_INFINITY });
+				}
+
+				inventoryItems = nextItems;
+				inventoryStateDirty = false;
+				inventoryStateAnimate = false;
+				await applyVisibleItems(nextVisible, preserveAnchor, duration);
+			} finally {
+				inventoryStateFlushInFlight = false;
+				if (inventoryStateFlushPending && !inventoryScrollActive && !document.hidden) {
+					inventoryStateFlushPending = false;
+					void flushInventoryState();
+				}
+			}
+		}
+
+		function onInventoryScroll(): void {
+			inventoryScrollActive = true;
+			if (inventoryScrollTimer) {
+				clearTimeout(inventoryScrollTimer);
+			}
+			inventoryScrollTimer = setTimeout(() => {
+				inventoryScrollTimer = null;
+				inventoryScrollActive = false;
+				if (inventoryStateDirty && !document.hidden) {
+					void flushInventoryState();
+				}
+			}, 150);
+		}
+
+		const applySearchDebounced = debounce(() => {
+			searchTerm = searchValue.trim();
+			void recomputeInventory({ preserveAnchor: false });
 	}, 500);
 
 	function displayNameFor(item: InventoryItem): string {
@@ -90,39 +145,93 @@
 		return item.id;
 	}
 
-	function stopInventoryEventStream(): void {
-		requestInventoryReload.cancel();
-		lastInventoryEventVersion = null;
-		if (inventoryEventSource) {
-			try {
-				inventoryEventSource.close();
-			} catch {
-				// ignore
+		function stopInventoryEventStream(): void {
+			lastInventoryEventVersion = null;
+			inventoryStateDirty = false;
+			inventoryStateAnimate = false;
+			inventoryStateFlushInFlight = false;
+			inventoryStateFlushPending = false;
+			if (inventoryScrollTimer) {
+				clearTimeout(inventoryScrollTimer);
+				inventoryScrollTimer = null;
 			}
-			inventoryEventSource = null;
+			if (inventoryEventSource) {
+				try {
+					inventoryEventSource.close();
+				} catch {
+					// ignore
+				}
+				inventoryEventSource = null;
+			}
 		}
-	}
 
-	function startInventoryEventStream(): void {
-		stopInventoryEventStream();
-		if (!terminalId) return;
+		function startInventoryEventStream(): void {
+			stopInventoryEventStream();
+			if (!terminalId) return;
 
-		inventoryEventSource = openInventorySse(terminalId, {
-			onHello: (msg) => {
-				lastInventoryEventVersion = msg.version ?? null;
-			},
-			onInventory: (msg) => {
-				if (msg.terminalId && msg.terminalId !== terminalId) {
-					return;
+			inventoryEventSource = openInventorySse(terminalId, {
+				onHello: (msg) => {
+					lastInventoryEventVersion = msg.version ?? null;
+				},
+				onSnapshot: (msg) => {
+					if (msg.terminalId && msg.terminalId !== terminalId) return;
+
+					const items = Array.isArray(msg.items) ? msg.items : [];
+					inventoryState = new Map(items.map((item) => [item.uniqueId, item]));
+					inventoryStateDirty = true;
+					inventoryStateAnimate = false;
+					lastInventoryEventVersion = msg.version ?? lastInventoryEventVersion;
+					void flushInventoryState();
+				},
+				onDelta: (msg) => {
+					if (msg.terminalId && msg.terminalId !== terminalId) return;
+					if (msg.version == null) return;
+					if (lastInventoryEventVersion == null) return;
+					if (msg.version !== lastInventoryEventVersion + 1) {
+						showToast('Inventory stream out of sync, resyncing...', 'error');
+						startInventoryEventStream();
+						return;
+					}
+
+					lastInventoryEventVersion = msg.version;
+
+					let shouldAnimate = false;
+
+					const removed = Array.isArray(msg.removed) ? msg.removed : [];
+					for (const id of removed) {
+						inventoryState.delete(id);
+					}
+
+					const added = Array.isArray(msg.added) ? msg.added : [];
+					for (const item of added) {
+						if (!item?.uniqueId) continue;
+						inventoryState.set(item.uniqueId, item);
+					}
+
+					const updated = Array.isArray(msg.updated) ? msg.updated : [];
+					for (const patch of updated) {
+						const prev = inventoryState.get(patch.uniqueId);
+						if (!prev) continue;
+
+						if (sort === 'amount' && patch.amount !== prev.amount) {
+							shouldAnimate = true;
+						}
+
+						const nextName = typeof patch.name === 'string' && patch.name.trim() ? patch.name : prev.name;
+						inventoryState.set(patch.uniqueId, {
+							...prev,
+							amount: patch.amount,
+							craftable: patch.craftable,
+							name: nextName
+						});
+					}
+
+					inventoryStateDirty = true;
+					inventoryStateAnimate = shouldAnimate;
+					void flushInventoryState();
 				}
-				if (msg.version != null && msg.version === lastInventoryEventVersion) {
-					return;
-				}
-				lastInventoryEventVersion = msg.version ?? lastInventoryEventVersion;
-				requestInventoryReload();
-			}
-		});
-	}
+			});
+		}
 
 	async function checkConnection(): Promise<void> {
 		try {
@@ -143,33 +252,33 @@
 			terminals = Array.isArray(data.terminals) ? data.terminals : [];
 
 			const connected = getConnectedTerminals(terminals);
-			if (connected.length === 0) {
-				terminalDisplayName = terminals.length === 0 ? 'No terminals' : 'No connected terminals';
-				if (terminalId) {
-					terminalId = '';
-					stopInventoryEventStream();
+				if (connected.length === 0) {
+					terminalDisplayName = terminals.length === 0 ? 'No terminals' : 'No connected terminals';
+					if (terminalId) {
+						terminalId = '';
+						stopInventoryEventStream();
+					}
+					inventoryItems = [];
+					inventoryState = new Map();
+					visibleItems = [];
+					cpus = [];
+					return;
 				}
-				inventoryItems = [];
-				visibleItems = [];
-				cpus = [];
-				return;
-			}
 
 			const previous = terminalId;
 			const stillConnected = previous && connected.some((t) => t.id === previous);
 			const effective = stillConnected ? connected.find((t) => t.id === previous)! : connected[0];
 
 			terminalId = effective.id;
-			terminalDisplayName = effective.displayName;
+				terminalDisplayName = effective.displayName;
 
-			if (terminalId !== previous) {
-				await loadInventory(false);
-				await loadCpus();
-				startInventoryEventStream();
+				if (terminalId !== previous) {
+					await loadCpus();
+					startInventoryEventStream();
+				}
+			} catch (e) {
+				console.error('Failed to load terminals', e);
 			}
-		} catch (e) {
-			console.error('Failed to load terminals', e);
-		}
 	}
 
 	function captureScrollAnchor(): { id: string; topOffset: number } | null {
@@ -200,13 +309,13 @@
 		return String(value).replace(/["\\]/g, '\\$&');
 	}
 
-	function restoreScrollAnchor(anchor: { id: string; topOffset: number } | null): void {
-		if (!anchor?.id || !inventoryScrollEl || !inventoryGridEl) return;
+	function restoreScrollAnchor(anchor: { id: string; topOffset: number } | null): number {
+		if (!anchor?.id || !inventoryScrollEl || !inventoryGridEl) return 0;
 
 		try {
 			const selector = `[data-item-id="${escapeCssAttr(anchor.id)}"]`;
 			const el = inventoryGridEl.querySelector(selector) as HTMLElement | null;
-			if (!el) return;
+			if (!el) return 0;
 
 			const scrollRect = inventoryScrollEl.getBoundingClientRect();
 			const rect = el.getBoundingClientRect();
@@ -214,49 +323,162 @@
 			const delta = newOffset - anchor.topOffset;
 			if (Number.isFinite(delta) && Math.abs(delta) > 0.5) {
 				inventoryScrollEl.scrollTop += delta;
+				return delta;
 			}
 		} catch {
 			// ignore
 		}
+		return 0;
 	}
 
-	function computeVisible(items: InventoryItem[]): InventoryItem[] {
-		let out = Array.isArray(items) ? items : [];
+	function captureFlipPositions(elements: Iterable<HTMLElement>): Map<string, FlipPosition> {
+		const out = new Map<string, FlipPosition>();
+		for (const el of elements) {
+			const id = el.dataset.itemId;
+			if (!id) continue;
+			const rect = el.getBoundingClientRect();
+			out.set(id, { left: rect.left, top: rect.top });
+		}
+		return out;
+	}
 
-		if (searchTerm) {
-			out = out.filter((item) => {
-				const name = displayNameFor(item);
-				return matchItem(name, searchTerm) || matchItem(item.id, searchTerm);
+	function getAnimatableSlots({ maxSlots = 400, overscanRows = 2 }: { maxSlots?: number; overscanRows?: number } = {}): HTMLElement[] {
+		if (!inventoryGridEl || !inventoryScrollEl) return [];
+
+		const nodes = inventoryGridEl.querySelectorAll('.item-slot') as NodeListOf<HTMLElement>;
+		const total = nodes.length;
+		if (total === 0) return [];
+
+		const first = nodes[0];
+		const firstRect = first.getBoundingClientRect();
+		const firstTop = firstRect.top;
+
+		let columns = 1;
+		for (let i = 1; i < total && i < 64; i++) {
+			const rect = nodes[i].getBoundingClientRect();
+			if (Math.abs(rect.top - firstTop) > 0.5) break;
+			columns += 1;
+		}
+		if (columns < 1) columns = 1;
+
+		let rowStep = firstRect.height || 64;
+		if (total > columns) {
+			const secondRowTop = nodes[columns].getBoundingClientRect().top;
+			const step = secondRowTop - firstTop;
+			if (Number.isFinite(step) && Math.abs(step) > 0.5) {
+				rowStep = Math.abs(step);
+			}
+		}
+
+		const scrollTop = inventoryScrollEl.scrollTop;
+		const viewportHeight = inventoryScrollEl.clientHeight;
+		const scrollRect = inventoryScrollEl.getBoundingClientRect();
+		const firstOffset = firstRect.top - scrollRect.top + scrollTop;
+
+		const overscanPx = rowStep * overscanRows;
+		let startRow = Math.floor((scrollTop - overscanPx - firstOffset) / rowStep);
+		let endRow = Math.floor((scrollTop + viewportHeight + overscanPx - firstOffset) / rowStep);
+
+		if (!Number.isFinite(startRow)) startRow = 0;
+		if (!Number.isFinite(endRow)) endRow = startRow;
+
+		startRow = Math.max(0, startRow);
+		endRow = Math.max(startRow, endRow);
+
+		let startIndex = startRow * columns;
+		let endIndex = Math.min(total, (endRow + 1) * columns);
+
+		startIndex = Math.max(0, Math.min(startIndex, total));
+		if (startIndex >= total) {
+			startIndex = Math.max(0, total - maxSlots);
+		}
+		endIndex = Math.max(startIndex, endIndex);
+		if (endIndex - startIndex > maxSlots) {
+			endIndex = startIndex + maxSlots;
+		}
+
+		const out: HTMLElement[] = [];
+		for (let i = startIndex; i < endIndex; i++) {
+			out.push(nodes[i]);
+		}
+		return out;
+	}
+
+		function computeVisible(items: InventoryItem[]): InventoryItem[] {
+			let out = Array.isArray(items) ? items : [];
+
+			if (filter === 'items') {
+				out = out.filter((item) => item.type === 'item');
+			} else if (filter === 'fluids') {
+				out = out.filter((item) => item.type === 'fluid');
+			}
+
+			if (searchTerm) {
+				out = out.filter((item) => {
+					const name = displayNameFor(item);
+					return matchItem(name, searchTerm) || matchItem(item.id, searchTerm);
 			});
 		}
 
 		return sortInventoryItems(out, sort);
 	}
 
-	async function recomputeInventory({ preserveAnchor }: { preserveAnchor: boolean }): Promise<void> {
-		const anchor = preserveAnchor ? captureScrollAnchor() : null;
-		visibleItems = computeVisible(inventoryItems);
-		await tick();
-		restoreScrollAnchor(anchor);
+	function hasPositionChanged(previous: InventoryItem[], next: InventoryItem[]): boolean {
+		if (!Array.isArray(previous) || previous.length === 0) return false;
+		if (!Array.isArray(next) || next.length === 0) return false;
+
+		const prevIndexById = new Map<string, number>();
+		for (let i = 0; i < previous.length; i++) {
+			prevIndexById.set(previous[i].uniqueId, i);
+		}
+
+		for (let i = 0; i < next.length; i++) {
+			const prevIndex = prevIndexById.get(next[i].uniqueId);
+			if (prevIndex != null && prevIndex !== i) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
-	async function loadInventory(preserveAnchor: boolean): Promise<void> {
-		const requestId = ++inventoryRequestId;
-		try {
-			const data = await fetchInventory(terminalId, filter);
-			if (requestId !== inventoryRequestId) return;
+	async function applyVisibleItems(
+		nextVisible: InventoryItem[],
+		preserveAnchor: boolean,
+		animationDuration: number
+	): Promise<void> {
+		const anchor = preserveAnchor ? captureScrollAnchor() : null;
+		const wantsAnimate = Boolean(animationDuration) && !prefersReducedMotion() && Boolean(inventoryGridEl) && Boolean(inventoryScrollEl);
+		const beforeSlots = wantsAnimate ? getAnimatableSlots() : null;
+		const fromPositions = beforeSlots && beforeSlots.length > 0 ? captureFlipPositions(beforeSlots) : null;
 
-			inventoryItems = Array.isArray(data.items) ? data.items : [];
-			await recomputeInventory({ preserveAnchor });
-		} catch (e) {
-			console.error('Failed to load inventory', e);
+		visibleItems = nextVisible;
+		await tick();
+
+		const scrollDelta = preserveAnchor ? restoreScrollAnchor(anchor) : 0;
+		if (wantsAnimate && fromPositions) {
+			const afterSlots = getAnimatableSlots();
+			const effectiveDuration = computeFlipDuration(sort, afterSlots.length, true, { durationMs: animationDuration });
+			if (effectiveDuration > 0) {
+				playFlipAnimation({
+					elements: afterSlots,
+					getKey: (node) => node.dataset.itemId ?? null,
+					from: fromPositions,
+					durationMs: effectiveDuration,
+					scrollDeltaY: scrollDelta
+				});
+			}
 		}
 	}
 
-	async function loadCpus(): Promise<void> {
-		if (!terminalId) {
-			cpus = [];
-			return;
+	async function recomputeInventory({ preserveAnchor }: { preserveAnchor: boolean }): Promise<void> {
+		await applyVisibleItems(computeVisible(inventoryItems), preserveAnchor, 0);
+	}
+
+		async function loadCpus(): Promise<void> {
+			if (!terminalId) {
+				cpus = [];
+				return;
 		}
 
 		try {
@@ -267,39 +489,41 @@
 		}
 	}
 
-	async function refreshData(): Promise<void> {
-		await checkConnection();
-		await loadInventory(false);
-	}
+		async function refreshData(): Promise<void> {
+			await checkConnection();
+			startInventoryEventStream();
+		}
 
 	function openTerminalDropdown(): void {
 		terminalDropdownOpen = !terminalDropdownOpen;
 	}
 
-	function selectTerminal(next: TerminalInfo): void {
-		const previous = terminalId;
-		terminalId = next.id;
-		terminalDisplayName = next.displayName;
-		terminalDropdownOpen = false;
+		function selectTerminal(next: TerminalInfo): void {
+			const previous = terminalId;
+			terminalId = next.id;
+			terminalDisplayName = next.displayName;
+			terminalDropdownOpen = false;
 
-		if (terminalId !== previous) {
-			void loadInventory(false);
-			void loadCpus();
-			startInventoryEventStream();
+			if (terminalId !== previous) {
+				inventoryItems = [];
+				inventoryState = new Map();
+				visibleItems = [];
+				void loadCpus();
+				startInventoryEventStream();
+			}
 		}
-	}
 
-	function setFilter(next: InventoryFilter): void {
-		filter = next;
-		void loadInventory(false);
-	}
+		function setFilter(next: InventoryFilter): void {
+			if (filter === next) return;
+			filter = next;
+			void recomputeInventory({ preserveAnchor: false });
+		}
 
 	async function setSort(next: SortMode): Promise<void> {
 		if (sort === next) return;
-		flipDuration = computeFlipDuration(next, visibleItems.length, true);
 		sort = next;
-		await recomputeInventory({ preserveAnchor: next === 'amount' });
-		flipDuration = 0;
+		const nextVisible = computeVisible(inventoryItems);
+		await applyVisibleItems(nextVisible, next === 'amount', 0);
 	}
 
 	function executeSearchNow(): void {
@@ -479,15 +703,15 @@
 		}
 	}
 
-	onMount(() => {
-		void loadTerminalsPoll();
-		void refreshData();
-		void loadCpus();
-		startInventoryEventStream();
+		onMount(() => {
+			void loadTerminalsPoll();
+			void checkConnection();
+			void loadCpus();
 
-		const statusTimer = window.setInterval(() => void checkConnection(), 5000);
-		const terminalsTimer = window.setInterval(() => void loadTerminalsPoll(), 10000);
-		const cpuTimer = window.setInterval(() => void loadCpus(), 2000);
+			const statusTimer = window.setInterval(() => void checkConnection(), 5000);
+			const terminalsTimer = window.setInterval(() => void loadTerminalsPoll(), 10000);
+			const cpuTimer = window.setInterval(() => void loadCpus(), 2000);
+			inventoryScrollEl?.addEventListener('scroll', onInventoryScroll, { passive: true });
 
 		const onDocClick = (e: MouseEvent) => {
 			if (!terminalDropdownOpen) return;
@@ -507,17 +731,17 @@
 		document.addEventListener('click', onDocClick);
 		document.addEventListener('keydown', onKeyDown);
 
-		return () => {
-			clearInterval(statusTimer);
-			clearInterval(terminalsTimer);
-			clearInterval(cpuTimer);
-			document.removeEventListener('click', onDocClick);
-			document.removeEventListener('keydown', onKeyDown);
-			stopInventoryEventStream();
-			applySearchDebounced.cancel();
-			requestInventoryReload.cancel();
-		};
-	});
+			return () => {
+				clearInterval(statusTimer);
+				clearInterval(terminalsTimer);
+				clearInterval(cpuTimer);
+				inventoryScrollEl?.removeEventListener('scroll', onInventoryScroll);
+				document.removeEventListener('click', onDocClick);
+				document.removeEventListener('keydown', onKeyDown);
+				stopInventoryEventStream();
+				applySearchDebounced.cancel();
+			};
+		});
 
 	onDestroy(() => stopInventoryEventStream());
 
@@ -616,14 +840,14 @@
 			</div>
 		</div>
 
-		<div class="status-section">
-			<div class="stat-box">
-				<div class="stat-label">Total Items</div>
-				<div class="stat-value items" id="total-items">{formatNumber(totalItemAmount)}</div>
-			</div>
-			<div class="stat-box">
-				<div class="stat-label">Types</div>
-				<div class="stat-value" id="item-types">{formatNumber(typeCount)}</div>
+			<div class="status-section">
+				<div class="stat-box">
+					<div class="stat-label">Total Items</div>
+				<div class="stat-value items" id="total-items">{formatAmount(totalItemAmount)}</div>
+				</div>
+				<div class="stat-box">
+					<div class="stat-label">Types</div>
+					<div class="stat-value" id="item-types">{formatNumber(typeCount)}</div>
 			</div>
 			<div class="status-indicator">
 				<div id="status-led" class={`status-led ${online ? '' : 'offline'}`}></div>
@@ -702,7 +926,6 @@
 								data-item-type={item.type}
 								role="button"
 								tabindex="-1"
-								animate:flip={{ duration: flipDuration }}
 								on:click={() => item.craftable && openCraftModal(item)}
 								on:keydown={(e) => {
 									if (e.key === 'Enter' || e.key === ' ') {
@@ -832,7 +1055,14 @@
 								{#if cpu.busy && cpu.jobStatus}
 									{@const job = cpu.jobStatus}
 									{@const crafting = job.crafting}
-									{@const progressPct = job.totalItems > 0 ? Math.round((job.progress / job.totalItems) * 100) : 0}
+									{@const outputTotal = job.outputTotal ?? 0}
+									{@const outputDone = job.outputDone ?? 0}
+									{@const hasOutputProgress = outputTotal > 0}
+									{@const progressPct = hasOutputProgress
+										? Math.round((outputDone / outputTotal) * 100)
+										: job.totalItems > 0
+											? Math.round((job.progress / job.totalItems) * 100)
+											: 0}
 									<div class="cpu-job">
 										<div class="cpu-job-icon-wrapper">
 											{#if crafting?.iconKey}
@@ -853,7 +1083,11 @@
 												<div class="cpu-progress">
 													<div class="cpu-progress-bar" style={`width: ${progressPct}%`}></div>
 												</div>
-												<span class="cpu-progress-text">{job.progress}/{job.totalItems}</span>
+												{#if hasOutputProgress}
+													<span class="cpu-progress-text">{outputDone}/{outputTotal}</span>
+												{:else}
+													<span class="cpu-progress-text">{job.progress}/{job.totalItems}</span>
+												{/if}
 											</div>
 										</div>
 									</div>

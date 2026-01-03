@@ -72,6 +72,12 @@ public final class CpuHandler {
                 PrerenderStorageService storage = PrerenderStorageService.getInstance();
                 jobStatus.put("crafting", genericStackToJson(status.crafting(), storage));
             }
+            OutputProgress outputProgress = getOutputProgress(cpu, status);
+            if (outputProgress != null) {
+                jobStatus.put("outputTotal", outputProgress.total());
+                jobStatus.put("outputDone", outputProgress.done());
+                jobStatus.put("outputRemaining", outputProgress.remaining());
+            }
             jobStatus.put("totalItems", status.totalItems());
             jobStatus.put("progress", status.progress());
             jobStatus.put("elapsedTimeNanos", status.elapsedTimeNanos());
@@ -105,6 +111,92 @@ public final class CpuHandler {
         );
     }
 
+    private static OutputProgress getOutputProgress(ICraftingCPU cpu, CraftingJobStatus status) {
+        Long remaining = readFinalOutputRemainingFromCpu(cpu);
+        if (remaining == null) {
+            return null;
+        }
+
+        Long total = readFinalOutputTotalFromCpu(cpu);
+        if (total == null && status.crafting() != null) {
+            total = status.crafting().amount();
+        }
+        if (total == null || total <= 0) {
+            return null;
+        }
+
+        long clampedRemaining = Math.max(0L, Math.min(remaining, total));
+        long done = total - clampedRemaining;
+        return new OutputProgress(total, done, clampedRemaining);
+    }
+
+    private static Long readFinalOutputRemainingFromCpu(ICraftingCPU cpu) {
+        Object job = readCpuExecutingJob(cpu);
+        if (job == null) {
+            return null;
+        }
+
+        try {
+            var remainingField = job.getClass().getDeclaredField("remainingAmount");
+            remainingField.setAccessible(true);
+            Object remaining = remainingField.get(job);
+            if (remaining instanceof Number number) {
+                return number.longValue();
+            }
+            return null;
+        } catch (ReflectiveOperationException e) {
+            return null;
+        }
+    }
+
+    private static Long readFinalOutputTotalFromCpu(ICraftingCPU cpu) {
+        Object job = readCpuExecutingJob(cpu);
+        if (job == null) {
+            return null;
+        }
+
+        try {
+            var finalOutputField = job.getClass().getDeclaredField("finalOutput");
+            finalOutputField.setAccessible(true);
+            Object finalOutput = finalOutputField.get(job);
+            if (finalOutput == null) {
+                return null;
+            }
+
+            var amountMethod = finalOutput.getClass().getMethod("amount");
+            Object amount = amountMethod.invoke(finalOutput);
+            if (amount instanceof Number number) {
+                return number.longValue();
+            }
+            return null;
+        } catch (ReflectiveOperationException e) {
+            return null;
+        }
+    }
+
+    private static Object readCpuExecutingJob(ICraftingCPU cpu) {
+        if (cpu == null) {
+            return null;
+        }
+
+        try {
+            var craftingLogicField = cpu.getClass().getField("craftingLogic");
+            Object craftingLogic = craftingLogicField.get(cpu);
+            if (craftingLogic == null) {
+                return null;
+            }
+
+            var jobField = craftingLogic.getClass().getDeclaredField("job");
+            jobField.setAccessible(true);
+            return jobField.get(craftingLogic);
+        } catch (ReflectiveOperationException e) {
+            return null;
+        }
+    }
+
+    private record OutputProgress(long total, long done, long remaining) {
+    }
+
     public static List<Map<String, Object>> keyCounterToStackList(appeng.api.stacks.KeyCounter keyCounter) {
         List<Map<String, Object>> missing = new ArrayList<>();
         if (keyCounter == null) {
@@ -123,4 +215,3 @@ public final class CpuHandler {
         return missing;
     }
 }
-
