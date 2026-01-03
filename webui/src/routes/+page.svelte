@@ -29,7 +29,10 @@
 	import { PLACEHOLDER_ICON } from '$lib/constants';
 	import { formatAmount, formatFluidAmount, formatNumber } from '$lib/utils/format';
 	import { arrayMove } from '$lib/utils/arrayMove';
-	import { buildInventoryRenderNodes, type InventoryRenderNode } from '$lib/utils/inventoryGrouping';
+	import {
+		buildInventoryRenderNodes,
+		type InventoryRenderNode
+	} from '$lib/utils/inventoryGrouping';
 	import { sortInventoryItems } from '$lib/utils/inventorySort';
 	import { legacyTextToHtml } from '$lib/utils/minecraftText';
 	import { matchItem } from '$lib/utils/pinyin';
@@ -59,39 +62,44 @@
 	let typeCount = 0;
 	let connectedTerminals: TerminalInfo[] = [];
 	let cpuCount = 0;
-		let statusText = 'OFFLINE';
+	let statusText = 'OFFLINE';
 
-		let inventoryScrollEl: HTMLDivElement | null = null;
-		let inventoryGridEl: HTMLDivElement | null = null;
-		let inventoryEventSource: EventSource | null = null;
-		let lastInventoryEventVersion: number | null = null;
+	let inventoryScrollEl: HTMLDivElement | null = null;
+	let inventoryGridEl: HTMLDivElement | null = null;
+	let inventoryEventSource: EventSource | null = null;
+	let lastInventoryEventVersion: number | null = null;
 
-			let inventoryState = new Map<string, InventoryItem>();
-			let inventoryStateDirty = false;
-			let inventoryStateFlushInFlight = false;
-			let inventoryStateFlushPending = false;
+	let inventoryState = new Map<string, InventoryItem>();
+	let inventoryStateDirty = false;
+	let inventoryStateFlushInFlight = false;
+	let inventoryStateFlushPending = false;
 
-		let inventoryScrollActive = false;
-		let inventoryScrollTimer: ReturnType<typeof setTimeout> | null = null;
+	let inventoryScrollActive = false;
+	let inventoryScrollTimer: ReturnType<typeof setTimeout> | null = null;
 
-		let cpus: CpuDto[] = [];
-		let inventoryViewConfig: InventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
-		let inventoryViewConfigTerminalId: string | null = null;
-		let inventoryRenderNodes: InventoryRenderNode[] = [];
+	let cpus: CpuDto[] = [];
+	let inventoryViewConfig: InventoryViewConfig = {
+		whitelist: [],
+		blacklist: [],
+		categories: [],
+		collapsed: {}
+	};
+	let inventoryViewConfigTerminalId: string | null = null;
+	let inventoryRenderNodes: InventoryRenderNode[] = [];
 
-		let inventorySettingsOpen = false;
-		let inventorySettingsOverlayEl: HTMLDivElement | null = null;
-		let inventorySettingsTerminalId: string | null = null;
-		let inventorySettingsTerminalName: string | null = null;
-		let inventorySettingsWhitelistText = '';
-		let inventorySettingsBlacklistText = '';
-		type InventoryCategoryDraft = { id: string; name: string; tagRegex: string };
-		let inventorySettingsCategories: InventoryCategoryDraft[] = [];
-		let inventorySettingsCategoryIdSeq = 0;
-		let inventorySettingsCategoryDragId: string | null = null;
-		let inventorySettingsCategoryDragOverId: string | null = null;
-		let inventorySettingsSaving = false;
-		let inventorySettingsError: string | null = null;
+	let inventorySettingsOpen = false;
+	let inventorySettingsOverlayEl: HTMLDivElement | null = null;
+	let inventorySettingsTerminalId: string | null = null;
+	let inventorySettingsTerminalName: string | null = null;
+	let inventorySettingsWhitelistText = '';
+	let inventorySettingsBlacklistText = '';
+	type InventoryCategoryDraft = { id: string; name: string; tagRegex: string };
+	let inventorySettingsCategories: InventoryCategoryDraft[] = [];
+	let inventorySettingsCategoryIdSeq = 0;
+	let inventorySettingsCategoryDragId: string | null = null;
+	let inventorySettingsCategoryDragOverId: string | null = null;
+	let inventorySettingsSaving = false;
+	let inventorySettingsError: string | null = null;
 
 	let craftOpen = false;
 	let craftItem: InventoryItem | null = null;
@@ -131,55 +139,55 @@
 	let tooltipLastY = 0;
 	let tooltipHasLastPos = false;
 
-			async function flushInventoryState(): Promise<void> {
-				if (document.hidden) return;
-				if (!inventoryStateDirty) return;
-			if (inventoryScrollActive) {
-				inventoryStateFlushPending = true;
-				return;
-			}
-			if (inventoryStateFlushInFlight) {
-				inventoryStateFlushPending = true;
-				return;
-			}
-
-			inventoryStateFlushInFlight = true;
-			try {
-				const nextItems = Array.from(inventoryState.values());
-					const nextVisible = computeVisible(nextItems);
-
-					const positionChanged = sort === 'amount' && hasPositionChanged(visibleItems, nextVisible);
-					const preserveAnchor = positionChanged;
-
-					inventoryItems = nextItems;
-					inventoryStateDirty = false;
-					await applyVisibleItems(nextVisible, preserveAnchor);
-				} finally {
-					inventoryStateFlushInFlight = false;
-					if (inventoryStateFlushPending && !inventoryScrollActive && !document.hidden) {
-						inventoryStateFlushPending = false;
-					void flushInventoryState();
-				}
-			}
+	async function flushInventoryState(): Promise<void> {
+		if (document.hidden) return;
+		if (!inventoryStateDirty) return;
+		if (inventoryScrollActive) {
+			inventoryStateFlushPending = true;
+			return;
+		}
+		if (inventoryStateFlushInFlight) {
+			inventoryStateFlushPending = true;
+			return;
 		}
 
-		function onInventoryScroll(): void {
-			inventoryScrollActive = true;
-			if (inventoryScrollTimer) {
-				clearTimeout(inventoryScrollTimer);
-			}
-			inventoryScrollTimer = setTimeout(() => {
-				inventoryScrollTimer = null;
-				inventoryScrollActive = false;
-				if (inventoryStateDirty && !document.hidden) {
-					void flushInventoryState();
-				}
-			}, 150);
-		}
+		inventoryStateFlushInFlight = true;
+		try {
+			const nextItems = Array.from(inventoryState.values());
+			const nextVisible = computeVisible(nextItems);
 
-		const applySearchDebounced = debounce(() => {
-			searchTerm = searchValue.trim();
-			void recomputeInventory({ preserveAnchor: false });
+			const positionChanged = sort === 'amount' && hasPositionChanged(visibleItems, nextVisible);
+			const preserveAnchor = positionChanged;
+
+			inventoryItems = nextItems;
+			inventoryStateDirty = false;
+			await applyVisibleItems(nextVisible, preserveAnchor);
+		} finally {
+			inventoryStateFlushInFlight = false;
+			if (inventoryStateFlushPending && !inventoryScrollActive && !document.hidden) {
+				inventoryStateFlushPending = false;
+				void flushInventoryState();
+			}
+		}
+	}
+
+	function onInventoryScroll(): void {
+		inventoryScrollActive = true;
+		if (inventoryScrollTimer) {
+			clearTimeout(inventoryScrollTimer);
+		}
+		inventoryScrollTimer = setTimeout(() => {
+			inventoryScrollTimer = null;
+			inventoryScrollActive = false;
+			if (inventoryStateDirty && !document.hidden) {
+				void flushInventoryState();
+			}
+		}, 150);
+	}
+
+	const applySearchDebounced = debounce(() => {
+		searchTerm = searchValue.trim();
+		void recomputeInventory({ preserveAnchor: false });
 	}, 500);
 
 	function displayNameFor(item: InventoryItem): string {
@@ -193,84 +201,85 @@
 		return item.id;
 	}
 
-			function stopInventoryEventStream(): void {
-				lastInventoryEventVersion = null;
-				inventoryStateDirty = false;
-				inventoryStateFlushInFlight = false;
-				inventoryStateFlushPending = false;
-				if (inventoryScrollTimer) {
-				clearTimeout(inventoryScrollTimer);
-				inventoryScrollTimer = null;
-			}
-			if (inventoryEventSource) {
-				try {
-					inventoryEventSource.close();
-				} catch {
-					// ignore
-				}
-				inventoryEventSource = null;
-			}
+	function stopInventoryEventStream(): void {
+		lastInventoryEventVersion = null;
+		inventoryStateDirty = false;
+		inventoryStateFlushInFlight = false;
+		inventoryStateFlushPending = false;
+		if (inventoryScrollTimer) {
+			clearTimeout(inventoryScrollTimer);
+			inventoryScrollTimer = null;
 		}
-
-		function startInventoryEventStream(): void {
-			stopInventoryEventStream();
-			if (!terminalId) return;
-
-			inventoryEventSource = openInventorySse(terminalId, {
-				onHello: (msg) => {
-					lastInventoryEventVersion = msg.version ?? null;
-				},
-				onSnapshot: (msg) => {
-					if (msg.terminalId && msg.terminalId !== terminalId) return;
-
-						const items = Array.isArray(msg.items) ? msg.items : [];
-						inventoryState = new Map(items.map((item) => [item.uniqueId, item]));
-						inventoryStateDirty = true;
-						lastInventoryEventVersion = msg.version ?? lastInventoryEventVersion;
-						void flushInventoryState();
-					},
-					onDelta: (msg) => {
-					if (msg.terminalId && msg.terminalId !== terminalId) return;
-					if (msg.version == null) return;
-					if (lastInventoryEventVersion == null) return;
-					if (msg.version !== lastInventoryEventVersion + 1) {
-						showToast('Inventory stream out of sync, resyncing...', 'error');
-						startInventoryEventStream();
-						return;
-					}
-
-						lastInventoryEventVersion = msg.version;
-
-						const removed = Array.isArray(msg.removed) ? msg.removed : [];
-						for (const id of removed) {
-							inventoryState.delete(id);
-					}
-
-					const added = Array.isArray(msg.added) ? msg.added : [];
-					for (const item of added) {
-						if (!item?.uniqueId) continue;
-						inventoryState.set(item.uniqueId, item);
-					}
-
-						const updated = Array.isArray(msg.updated) ? msg.updated : [];
-						for (const patch of updated) {
-							const prev = inventoryState.get(patch.uniqueId);
-							if (!prev) continue;
-
-							const nextName = typeof patch.name === 'string' && patch.name.trim() ? patch.name : prev.name;
-							inventoryState.set(patch.uniqueId, {
-								...prev,
-							amount: patch.amount,
-							craftable: patch.craftable,
-							name: nextName
-						});
-						}
-
-						inventoryStateDirty = true;
-						void flushInventoryState();
-					}
-				});
+		if (inventoryEventSource) {
+			try {
+				inventoryEventSource.close();
+			} catch {
+				// ignore
 			}
+			inventoryEventSource = null;
+		}
+	}
+
+	function startInventoryEventStream(): void {
+		stopInventoryEventStream();
+		if (!terminalId) return;
+
+		inventoryEventSource = openInventorySse(terminalId, {
+			onHello: (msg) => {
+				lastInventoryEventVersion = msg.version ?? null;
+			},
+			onSnapshot: (msg) => {
+				if (msg.terminalId && msg.terminalId !== terminalId) return;
+
+				const items = Array.isArray(msg.items) ? msg.items : [];
+				inventoryState = new Map(items.map((item) => [item.uniqueId, item]));
+				inventoryStateDirty = true;
+				lastInventoryEventVersion = msg.version ?? lastInventoryEventVersion;
+				void flushInventoryState();
+			},
+			onDelta: (msg) => {
+				if (msg.terminalId && msg.terminalId !== terminalId) return;
+				if (msg.version == null) return;
+				if (lastInventoryEventVersion == null) return;
+				if (msg.version !== lastInventoryEventVersion + 1) {
+					showToast('Inventory stream out of sync, resyncing...', 'error');
+					startInventoryEventStream();
+					return;
+				}
+
+				lastInventoryEventVersion = msg.version;
+
+				const removed = Array.isArray(msg.removed) ? msg.removed : [];
+				for (const id of removed) {
+					inventoryState.delete(id);
+				}
+
+				const added = Array.isArray(msg.added) ? msg.added : [];
+				for (const item of added) {
+					if (!item?.uniqueId) continue;
+					inventoryState.set(item.uniqueId, item);
+				}
+
+				const updated = Array.isArray(msg.updated) ? msg.updated : [];
+				for (const patch of updated) {
+					const prev = inventoryState.get(patch.uniqueId);
+					if (!prev) continue;
+
+					const nextName =
+						typeof patch.name === 'string' && patch.name.trim() ? patch.name : prev.name;
+					inventoryState.set(patch.uniqueId, {
+						...prev,
+						amount: patch.amount,
+						craftable: patch.craftable,
+						name: nextName
+					});
+				}
+
+				inventoryStateDirty = true;
+				void flushInventoryState();
+			}
+		});
+	}
 
 	async function checkConnection(): Promise<void> {
 		try {
@@ -296,34 +305,34 @@
 			terminals = Array.isArray(data.terminals) ? data.terminals : [];
 
 			const connected = getConnectedTerminals(terminals);
-				if (connected.length === 0) {
-					terminalDisplayName = terminals.length === 0 ? 'No terminals' : 'No connected terminals';
-					if (terminalId) {
-						terminalId = '';
-						stopInventoryEventStream();
-					}
-					inventoryItems = [];
-					inventoryState = new Map();
-					visibleItems = [];
-					cpus = [];
-					return;
+			if (connected.length === 0) {
+				terminalDisplayName = terminals.length === 0 ? 'No terminals' : 'No connected terminals';
+				if (terminalId) {
+					terminalId = '';
+					stopInventoryEventStream();
 				}
+				inventoryItems = [];
+				inventoryState = new Map();
+				visibleItems = [];
+				cpus = [];
+				return;
+			}
 
 			const previous = terminalId;
 			const stillConnected = previous && connected.some((t) => t.id === previous);
 			const effective = stillConnected ? connected.find((t) => t.id === previous)! : connected[0];
 
 			terminalId = effective.id;
-				terminalDisplayName = effective.displayName;
+			terminalDisplayName = effective.displayName;
 
-				if (terminalId !== previous) {
-					await loadCpus();
-					startInventoryEventStream();
-					await loadInventoryViewConfigForTerminal(terminalId);
-				}
-			} catch (e) {
-				console.error('Failed to load terminals', e);
+			if (terminalId !== previous) {
+				await loadCpus();
+				startInventoryEventStream();
+				await loadInventoryViewConfigForTerminal(terminalId);
 			}
+		} catch (e) {
+			console.error('Failed to load terminals', e);
+		}
 	}
 
 	function captureScrollAnchor(): { id: string; topOffset: number } | null {
@@ -373,22 +382,22 @@
 		} catch {
 			// ignore
 		}
-			return 0;
+		return 0;
+	}
+
+	function computeVisible(items: InventoryItem[]): InventoryItem[] {
+		let out = Array.isArray(items) ? items : [];
+
+		if (filter === 'items') {
+			out = out.filter((item) => item.type === 'item');
+		} else if (filter === 'fluids') {
+			out = out.filter((item) => item.type === 'fluid');
 		}
 
-			function computeVisible(items: InventoryItem[]): InventoryItem[] {
-				let out = Array.isArray(items) ? items : [];
-
-			if (filter === 'items') {
-				out = out.filter((item) => item.type === 'item');
-			} else if (filter === 'fluids') {
-				out = out.filter((item) => item.type === 'fluid');
-			}
-
-			if (searchTerm) {
-				out = out.filter((item) => {
-					const name = displayNameFor(item);
-					return matchItem(name, searchTerm) || matchItem(item.id, searchTerm);
+		if (searchTerm) {
+			out = out.filter((item) => {
+				const name = displayNameFor(item);
+				return matchItem(name, searchTerm) || matchItem(item.id, searchTerm);
 			});
 		}
 
@@ -414,27 +423,31 @@
 		return false;
 	}
 
-		async function applyVisibleItems(
-			nextVisible: InventoryItem[],
-			preserveAnchor: boolean
-		): Promise<void> {
-			const anchor = preserveAnchor ? captureScrollAnchor() : null;
-			visibleItems = nextVisible;
-			await tick();
+	async function applyVisibleItems(
+		nextVisible: InventoryItem[],
+		preserveAnchor: boolean
+	): Promise<void> {
+		const anchor = preserveAnchor ? captureScrollAnchor() : null;
+		visibleItems = nextVisible;
+		await tick();
 
-			if (preserveAnchor) {
-				restoreScrollAnchor(anchor);
-			}
+		if (preserveAnchor) {
+			restoreScrollAnchor(anchor);
 		}
+	}
 
-		async function recomputeInventory({ preserveAnchor }: { preserveAnchor: boolean }): Promise<void> {
-			await applyVisibleItems(computeVisible(inventoryItems), preserveAnchor);
-		}
+	async function recomputeInventory({
+		preserveAnchor
+	}: {
+		preserveAnchor: boolean;
+	}): Promise<void> {
+		await applyVisibleItems(computeVisible(inventoryItems), preserveAnchor);
+	}
 
-		async function loadCpus(): Promise<void> {
-			if (!terminalId) {
-				cpus = [];
-				return;
+	async function loadCpus(): Promise<void> {
+		if (!terminalId) {
+			cpus = [];
+			return;
 		}
 
 		try {
@@ -445,75 +458,92 @@
 		}
 	}
 
-		async function refreshData(): Promise<void> {
-			await checkConnection();
-			startInventoryEventStream();
-		}
+	async function refreshData(): Promise<void> {
+		await checkConnection();
+		startInventoryEventStream();
+	}
 
 	function openTerminalDropdown(): void {
 		terminalDropdownOpen = !terminalDropdownOpen;
 	}
 
-		function selectTerminal(next: TerminalInfo): void {
-			const previous = terminalId;
-			terminalId = next.id;
-			terminalDisplayName = next.displayName;
-			terminalDropdownOpen = false;
+	function selectTerminal(next: TerminalInfo): void {
+		const previous = terminalId;
+		terminalId = next.id;
+		terminalDisplayName = next.displayName;
+		terminalDropdownOpen = false;
 
-			if (terminalId !== previous) {
-				closeCpuProcessModal();
-				inventoryItems = [];
-				inventoryState = new Map();
-				visibleItems = [];
-				void loadCpus();
-				startInventoryEventStream();
-				void loadInventoryViewConfigForTerminal(terminalId);
-			}
+		if (terminalId !== previous) {
+			closeCpuProcessModal();
+			inventoryItems = [];
+			inventoryState = new Map();
+			visibleItems = [];
+			void loadCpus();
+			startInventoryEventStream();
+			void loadInventoryViewConfigForTerminal(terminalId);
+		}
+	}
+
+	function normalizeInventoryViewConfig(
+		raw: InventoryViewConfig | null | undefined
+	): InventoryViewConfig {
+		const whitelist = Array.isArray(raw?.whitelist)
+			? raw!.whitelist.filter((x) => typeof x === 'string' && x.trim())
+			: [];
+		const blacklist = Array.isArray(raw?.blacklist)
+			? raw!.blacklist.filter((x) => typeof x === 'string' && x.trim())
+			: [];
+		const categories = Array.isArray(raw?.categories)
+			? raw!.categories
+					.filter(
+						(x) =>
+							x &&
+							typeof x.name === 'string' &&
+							x.name.trim() &&
+							typeof x.tagRegex === 'string' &&
+							x.tagRegex.trim()
+					)
+					.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
+			: [];
+		const collapsed =
+			raw?.collapsed && typeof raw.collapsed === 'object'
+				? { ...(raw.collapsed as Record<string, boolean>) }
+				: {};
+		return { whitelist, blacklist, categories, collapsed };
+	}
+
+	function isUnauthorizedError(e: unknown): boolean {
+		const message = e instanceof Error ? e.message : String(e ?? '');
+		return message.toLowerCase().includes('unauthorized') || message.includes('HTTP 401');
+	}
+
+	async function loadInventoryViewConfigForTerminal(nextTerminalId: string): Promise<void> {
+		if (!nextTerminalId) {
+			inventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
+			inventoryViewConfigTerminalId = null;
+			return;
+		}
+		if (inventoryViewConfigTerminalId === nextTerminalId) {
+			return;
 		}
 
-		function normalizeInventoryViewConfig(raw: InventoryViewConfig | null | undefined): InventoryViewConfig {
-			const whitelist = Array.isArray(raw?.whitelist) ? raw!.whitelist.filter((x) => typeof x === 'string' && x.trim()) : [];
-			const blacklist = Array.isArray(raw?.blacklist) ? raw!.blacklist.filter((x) => typeof x === 'string' && x.trim()) : [];
-			const categories = Array.isArray(raw?.categories)
-				? raw!.categories
-						.filter((x) => x && typeof x.name === 'string' && x.name.trim() && typeof x.tagRegex === 'string' && x.tagRegex.trim())
-						.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
-				: [];
-			const collapsed = raw?.collapsed && typeof raw.collapsed === 'object' ? { ...(raw.collapsed as Record<string, boolean>) } : {};
-			return { whitelist, blacklist, categories, collapsed };
-		}
-
-		function isUnauthorizedError(e: unknown): boolean {
-			const message = e instanceof Error ? e.message : String(e ?? '');
-			return message.toLowerCase().includes('unauthorized') || message.includes('HTTP 401');
-		}
-
-		async function loadInventoryViewConfigForTerminal(nextTerminalId: string): Promise<void> {
-			if (!nextTerminalId) {
-				inventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
-				inventoryViewConfigTerminalId = null;
+		try {
+			const cfg = await fetchInventoryViewConfig(nextTerminalId);
+			inventoryViewConfig = normalizeInventoryViewConfig(cfg);
+			inventoryViewConfigTerminalId = nextTerminalId;
+		} catch (e) {
+			if (isUnauthorizedError(e)) {
+				showToast('Invalid token', 'error');
+				setAuthToken('');
 				return;
 			}
-			if (inventoryViewConfigTerminalId === nextTerminalId) {
-				return;
-			}
-
-			try {
-				const cfg = await fetchInventoryViewConfig(nextTerminalId);
-				inventoryViewConfig = normalizeInventoryViewConfig(cfg);
-				inventoryViewConfigTerminalId = nextTerminalId;
-			} catch (e) {
-				if (isUnauthorizedError(e)) {
-					showToast('Invalid token', 'error');
-					setAuthToken('');
-					return;
-				}
-				inventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
-				inventoryViewConfigTerminalId = nextTerminalId;
-			}
+			inventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
+			inventoryViewConfigTerminalId = nextTerminalId;
 		}
+	}
 
-		const saveInventoryViewConfigDebounced = debounce((targetTerminalId: string, cfg: InventoryViewConfig) => {
+	const saveInventoryViewConfigDebounced = debounce(
+		(targetTerminalId: string, cfg: InventoryViewConfig) => {
 			void (async () => {
 				if (!targetTerminalId) return;
 				try {
@@ -529,216 +559,229 @@
 					}
 				}
 			})();
-		}, 600);
+		},
+		600
+	);
 
-		function toggleInventorySectionCollapsed(key: string): void {
-			if (!key) return;
-			const current = inventoryViewConfig?.collapsed ?? {};
-			const next = { ...current, [key]: !(current[key] === true) };
-			inventoryViewConfig = { ...inventoryViewConfig, collapsed: next };
-			if (terminalId) {
-				saveInventoryViewConfigDebounced(terminalId, inventoryViewConfig);
-			}
+	function toggleInventorySectionCollapsed(key: string): void {
+		if (!key) return;
+		const current = inventoryViewConfig?.collapsed ?? {};
+		const next = { ...current, [key]: !(current[key] === true) };
+		inventoryViewConfig = { ...inventoryViewConfig, collapsed: next };
+		if (terminalId) {
+			saveInventoryViewConfigDebounced(terminalId, inventoryViewConfig);
 		}
+	}
 
-		function onInventorySettingsOverlayClick(e: MouseEvent): void {
-			if (e.target === inventorySettingsOverlayEl) {
-				closeInventorySettingsModal();
-			}
+	function onInventorySettingsOverlayClick(e: MouseEvent): void {
+		if (e.target === inventorySettingsOverlayEl) {
+			closeInventorySettingsModal();
 		}
+	}
 
-		async function openInventorySettingsModalForTerminal(terminal: TerminalInfo): Promise<void> {
-			if (!terminal?.id) return;
-			inventorySettingsOpen = true;
-			inventorySettingsTerminalId = terminal.id;
-			inventorySettingsTerminalName = terminal.displayName;
-			inventorySettingsSaving = false;
-			inventorySettingsError = null;
+	async function openInventorySettingsModalForTerminal(terminal: TerminalInfo): Promise<void> {
+		if (!terminal?.id) return;
+		inventorySettingsOpen = true;
+		inventorySettingsTerminalId = terminal.id;
+		inventorySettingsTerminalName = terminal.displayName;
+		inventorySettingsSaving = false;
+		inventorySettingsError = null;
 
-			try {
-				const cfg = terminal.id === inventoryViewConfigTerminalId ? inventoryViewConfig : await fetchInventoryViewConfig(terminal.id);
-				const normalized = normalizeInventoryViewConfig(cfg);
-				inventorySettingsWhitelistText = normalized.whitelist.join('\n');
-				inventorySettingsBlacklistText = normalized.blacklist.join('\n');
-				inventorySettingsCategories = normalized.categories.map((x) => createInventoryCategoryDraft(x));
-				clearInventoryCategoryDrag();
-			} catch (e) {
-				if (isUnauthorizedError(e)) {
-					showToast('Invalid token', 'error');
-					setAuthToken('');
-					return;
-				}
-				inventorySettingsWhitelistText = '';
-				inventorySettingsBlacklistText = '';
-				inventorySettingsCategories = [];
-				inventorySettingsError = e instanceof Error ? e.message : 'Failed to load settings';
-			}
-		}
-
-		function closeInventorySettingsModal(): void {
-			inventorySettingsOpen = false;
-			inventorySettingsTerminalId = null;
-			inventorySettingsTerminalName = null;
-			inventorySettingsSaving = false;
-			inventorySettingsError = null;
+		try {
+			const cfg =
+				terminal.id === inventoryViewConfigTerminalId
+					? inventoryViewConfig
+					: await fetchInventoryViewConfig(terminal.id);
+			const normalized = normalizeInventoryViewConfig(cfg);
+			inventorySettingsWhitelistText = normalized.whitelist.join('\n');
+			inventorySettingsBlacklistText = normalized.blacklist.join('\n');
+			inventorySettingsCategories = normalized.categories.map((x) =>
+				createInventoryCategoryDraft(x)
+			);
 			clearInventoryCategoryDrag();
-		}
-
-		function createInventoryCategoryDraft(rule?: { name?: string; tagRegex?: string }): InventoryCategoryDraft {
-			inventorySettingsCategoryIdSeq += 1;
-			return {
-				id: `cat_${inventorySettingsCategoryIdSeq}`,
-				name: typeof rule?.name === 'string' ? rule.name : '',
-				tagRegex: typeof rule?.tagRegex === 'string' ? rule.tagRegex : ''
-			};
-		}
-
-		function clearInventoryCategoryDrag(): void {
-			inventorySettingsCategoryDragId = null;
-			inventorySettingsCategoryDragOverId = null;
-		}
-
-		function onInventoryCategoryDragStart(e: DragEvent, id: string): void {
-			if (!id || inventorySettingsSaving) return;
-			inventorySettingsCategoryDragId = id;
-			inventorySettingsCategoryDragOverId = id;
-
-			try {
-				e.dataTransfer?.setData('text/plain', id);
-			} catch {
-				// ignore
-			}
-
-			if (e.dataTransfer) {
-				e.dataTransfer.effectAllowed = 'move';
-			}
-		}
-
-		function onInventoryCategoryDragOver(e: DragEvent, overId: string): void {
-			if (!inventorySettingsCategoryDragId || inventorySettingsSaving) return;
-			e.preventDefault();
-
-			if (inventorySettingsCategoryDragOverId !== overId) {
-				inventorySettingsCategoryDragOverId = overId;
-			}
-
-			if (e.dataTransfer) {
-				e.dataTransfer.dropEffect = 'move';
-			}
-		}
-
-		function onInventoryCategoryDrop(e: DragEvent, dropId: string): void {
-			const fromId = inventorySettingsCategoryDragId;
-			if (!fromId || inventorySettingsSaving) return;
-			e.preventDefault();
-
-			const fromIndex = inventorySettingsCategories.findIndex((x) => x.id === fromId);
-			const toIndex = inventorySettingsCategories.findIndex((x) => x.id === dropId);
-			if (fromIndex === -1 || toIndex === -1) {
-				clearInventoryCategoryDrag();
+		} catch (e) {
+			if (isUnauthorizedError(e)) {
+				showToast('Invalid token', 'error');
+				setAuthToken('');
 				return;
 			}
+			inventorySettingsWhitelistText = '';
+			inventorySettingsBlacklistText = '';
+			inventorySettingsCategories = [];
+			inventorySettingsError = e instanceof Error ? e.message : 'Failed to load settings';
+		}
+	}
 
-			inventorySettingsCategories = arrayMove(inventorySettingsCategories, fromIndex, toIndex);
+	function closeInventorySettingsModal(): void {
+		inventorySettingsOpen = false;
+		inventorySettingsTerminalId = null;
+		inventorySettingsTerminalName = null;
+		inventorySettingsSaving = false;
+		inventorySettingsError = null;
+		clearInventoryCategoryDrag();
+	}
+
+	function createInventoryCategoryDraft(rule?: {
+		name?: string;
+		tagRegex?: string;
+	}): InventoryCategoryDraft {
+		inventorySettingsCategoryIdSeq += 1;
+		return {
+			id: `cat_${inventorySettingsCategoryIdSeq}`,
+			name: typeof rule?.name === 'string' ? rule.name : '',
+			tagRegex: typeof rule?.tagRegex === 'string' ? rule.tagRegex : ''
+		};
+	}
+
+	function clearInventoryCategoryDrag(): void {
+		inventorySettingsCategoryDragId = null;
+		inventorySettingsCategoryDragOverId = null;
+	}
+
+	function onInventoryCategoryDragStart(e: DragEvent, id: string): void {
+		if (!id || inventorySettingsSaving) return;
+		inventorySettingsCategoryDragId = id;
+		inventorySettingsCategoryDragOverId = id;
+
+		try {
+			e.dataTransfer?.setData('text/plain', id);
+		} catch {
+			// ignore
+		}
+
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+		}
+	}
+
+	function onInventoryCategoryDragOver(e: DragEvent, overId: string): void {
+		if (!inventorySettingsCategoryDragId || inventorySettingsSaving) return;
+		e.preventDefault();
+
+		if (inventorySettingsCategoryDragOverId !== overId) {
+			inventorySettingsCategoryDragOverId = overId;
+		}
+
+		if (e.dataTransfer) {
+			e.dataTransfer.dropEffect = 'move';
+		}
+	}
+
+	function onInventoryCategoryDrop(e: DragEvent, dropId: string): void {
+		const fromId = inventorySettingsCategoryDragId;
+		if (!fromId || inventorySettingsSaving) return;
+		e.preventDefault();
+
+		const fromIndex = inventorySettingsCategories.findIndex((x) => x.id === fromId);
+		const toIndex = inventorySettingsCategories.findIndex((x) => x.id === dropId);
+		if (fromIndex === -1 || toIndex === -1) {
 			clearInventoryCategoryDrag();
+			return;
 		}
 
-		function onInventoryCategoryDragEnd(): void {
-			clearInventoryCategoryDrag();
+		inventorySettingsCategories = arrayMove(inventorySettingsCategories, fromIndex, toIndex);
+		clearInventoryCategoryDrag();
+	}
+
+	function onInventoryCategoryDragEnd(): void {
+		clearInventoryCategoryDrag();
+	}
+
+	function addInventoryCategoryRule(): void {
+		inventorySettingsCategories = [...inventorySettingsCategories, createInventoryCategoryDraft()];
+	}
+
+	function removeInventoryCategoryRule(id: string): void {
+		if (!id) return;
+		inventorySettingsCategories = inventorySettingsCategories.filter((x) => x.id !== id);
+	}
+
+	function parseRegexLines(text: string): string[] {
+		return String(text)
+			.split('\n')
+			.map((x) => x.trim())
+			.filter(Boolean);
+	}
+
+	function validateRegex(pattern: string): string | null {
+		try {
+			// eslint-disable-next-line no-new
+			new RegExp(pattern, 'i');
+			return null;
+		} catch {
+			return `Invalid regex: ${pattern}`;
 		}
+	}
 
-		function addInventoryCategoryRule(): void {
-			inventorySettingsCategories = [...inventorySettingsCategories, createInventoryCategoryDraft()];
-		}
+	async function saveInventorySettings(): Promise<void> {
+		if (!inventorySettingsTerminalId) return;
+		inventorySettingsSaving = true;
+		inventorySettingsError = null;
 
-		function removeInventoryCategoryRule(id: string): void {
-			if (!id) return;
-			inventorySettingsCategories = inventorySettingsCategories.filter((x) => x.id !== id);
-		}
-
-		function parseRegexLines(text: string): string[] {
-			return String(text)
-				.split('\n')
-				.map((x) => x.trim())
-				.filter(Boolean);
-		}
-
-		function validateRegex(pattern: string): string | null {
-			try {
-				// eslint-disable-next-line no-new
-				new RegExp(pattern, 'i');
-				return null;
-			} catch {
-				return `Invalid regex: ${pattern}`;
-			}
-		}
-
-		async function saveInventorySettings(): Promise<void> {
-			if (!inventorySettingsTerminalId) return;
-			inventorySettingsSaving = true;
-			inventorySettingsError = null;
-
-			const whitelist = parseRegexLines(inventorySettingsWhitelistText);
-			const blacklist = parseRegexLines(inventorySettingsBlacklistText);
-			for (const p of [...whitelist, ...blacklist]) {
-				const err = validateRegex(p);
-				if (err) {
-					inventorySettingsError = err;
-					inventorySettingsSaving = false;
-					return;
-				}
-			}
-
-			const categories = inventorySettingsCategories
-				.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
-				.filter((x) => x.name && x.tagRegex);
-			for (const c of categories) {
-				const err = validateRegex(c.tagRegex);
-				if (err) {
-					inventorySettingsError = err;
-					inventorySettingsSaving = false;
-					return;
-				}
-			}
-
-			const nextCfg: InventoryViewConfig = {
-				whitelist,
-				blacklist,
-				categories,
-				collapsed: inventoryViewConfigTerminalId === inventorySettingsTerminalId ? inventoryViewConfig.collapsed : {}
-			};
-
-			try {
-				const saved = await saveInventoryViewConfig(inventorySettingsTerminalId, nextCfg);
-				if (terminalId === inventorySettingsTerminalId) {
-					inventoryViewConfig = normalizeInventoryViewConfig(saved);
-					inventoryViewConfigTerminalId = inventorySettingsTerminalId;
-				}
-				closeInventorySettingsModal();
-			} catch (e) {
-				if (isUnauthorizedError(e)) {
-					showToast('Invalid token', 'error');
-					setAuthToken('');
-					return;
-				}
-				inventorySettingsError = e instanceof Error ? e.message : 'Failed to save settings';
-			} finally {
+		const whitelist = parseRegexLines(inventorySettingsWhitelistText);
+		const blacklist = parseRegexLines(inventorySettingsBlacklistText);
+		for (const p of [...whitelist, ...blacklist]) {
+			const err = validateRegex(p);
+			if (err) {
+				inventorySettingsError = err;
 				inventorySettingsSaving = false;
+				return;
 			}
 		}
 
-		function setFilter(next: InventoryFilter): void {
-			if (filter === next) return;
-			filter = next;
-			void recomputeInventory({ preserveAnchor: false });
+		const categories = inventorySettingsCategories
+			.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
+			.filter((x) => x.name && x.tagRegex);
+		for (const c of categories) {
+			const err = validateRegex(c.tagRegex);
+			if (err) {
+				inventorySettingsError = err;
+				inventorySettingsSaving = false;
+				return;
+			}
 		}
 
-		async function setSort(next: SortMode): Promise<void> {
-			if (sort === next) return;
-			sort = next;
-			const nextVisible = computeVisible(inventoryItems);
-			await applyVisibleItems(nextVisible, next === 'amount');
+		const nextCfg: InventoryViewConfig = {
+			whitelist,
+			blacklist,
+			categories,
+			collapsed:
+				inventoryViewConfigTerminalId === inventorySettingsTerminalId
+					? inventoryViewConfig.collapsed
+					: {}
+		};
+
+		try {
+			const saved = await saveInventoryViewConfig(inventorySettingsTerminalId, nextCfg);
+			if (terminalId === inventorySettingsTerminalId) {
+				inventoryViewConfig = normalizeInventoryViewConfig(saved);
+				inventoryViewConfigTerminalId = inventorySettingsTerminalId;
+			}
+			closeInventorySettingsModal();
+		} catch (e) {
+			if (isUnauthorizedError(e)) {
+				showToast('Invalid token', 'error');
+				setAuthToken('');
+				return;
+			}
+			inventorySettingsError = e instanceof Error ? e.message : 'Failed to save settings';
+		} finally {
+			inventorySettingsSaving = false;
 		}
+	}
+
+	function setFilter(next: InventoryFilter): void {
+		if (filter === next) return;
+		filter = next;
+		void recomputeInventory({ preserveAnchor: false });
+	}
+
+	async function setSort(next: SortMode): Promise<void> {
+		if (sort === next) return;
+		sort = next;
+		const nextVisible = computeVisible(inventoryItems);
+		await applyVisibleItems(nextVisible, next === 'amount');
+	}
 
 	function executeSearchNow(): void {
 		applySearchDebounced.cancel();
@@ -832,7 +875,10 @@
 				stopCpuProcessTimer();
 				if (!cpuProcessCompletionNotified) {
 					const outputName = data?.summary?.finalOutput?.name;
-					showToast(outputName ? `Crafting complete: ${outputName}` : 'Crafting complete', 'success');
+					showToast(
+						outputName ? `Crafting complete: ${outputName}` : 'Crafting complete',
+						'success'
+					);
 					cpuProcessCompletionNotified = true;
 				}
 			}
@@ -861,7 +907,10 @@
 
 				if (!cpuProcessCompletionNotified) {
 					const outputName = cpuProcessData?.summary?.finalOutput?.name;
-					showToast(outputName ? `Crafting complete: ${outputName}` : 'Crafting complete', 'success');
+					showToast(
+						outputName ? `Crafting complete: ${outputName}` : 'Crafting complete',
+						'success'
+					);
 					cpuProcessCompletionNotified = true;
 				}
 				return;
@@ -1134,7 +1183,9 @@
 		: cpuProcessEntries;
 
 	$: cpuProcessEntriesActive = cpuProcessEntriesFiltered.filter((e) => Number(e?.active ?? 0) > 0);
-	$: cpuProcessEntriesWaiting = cpuProcessEntriesFiltered.filter((e) => Number(e?.waiting ?? 0) > 0);
+	$: cpuProcessEntriesWaiting = cpuProcessEntriesFiltered.filter(
+		(e) => Number(e?.waiting ?? 0) > 0
+	);
 	$: cpuProcessEntriesStored = cpuProcessEntriesFiltered.filter((e) => Number(e?.stored ?? 0) > 0);
 </script>
 
@@ -1143,8 +1194,17 @@
 		<div class="network-selector">
 			<div class="network-frame">
 				<div class="network-indicator">
-					<svg class="network-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M12 2v4M5 9c0 0 3-2 7-2s7 2 7 2M6 13c0 0 2-1 6-1s6 1 6 1" stroke-linecap="square" />
+					<svg
+						class="network-icon"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+					>
+						<path
+							d="M12 2v4M5 9c0 0 3-2 7-2s7 2 7 2M6 13c0 0 2-1 6-1s6 1 6 1"
+							stroke-linecap="square"
+						/>
 						<rect x="11" y="16" width="2" height="6" fill="currentColor" stroke="none" />
 						<circle cx="12" cy="15" r="2" fill="currentColor" stroke="none" />
 					</svg>
@@ -1178,11 +1238,21 @@
 								}}
 							>
 								<span id="terminal-selected-text">{terminalDisplayName}</span>
-								<svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<svg
+									class="select-arrow"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+								>
 									<polyline points="6 9 12 15 18 9" />
 								</svg>
 							</div>
-							<div class="ae2-select-dropdown" class:hidden={!terminalDropdownOpen} id="terminal-dropdown-list">
+							<div
+								class="ae2-select-dropdown"
+								class:hidden={!terminalDropdownOpen}
+								id="terminal-dropdown-list"
+							>
 								{#if connectedTerminals.length === 0}
 									<div class="ae2-select-option">No terminals found</div>
 								{:else}
@@ -1223,12 +1293,21 @@
 									connected: true
 								})}
 						>
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<path
-									d="M19.14 12.94a7.43 7.43 0 0 0 .05-.94 7.43 7.43 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.28 7.28 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 1h-3.8a.5.5 0 0 0-.49.42l-.36 2.54a7.28 7.28 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 7.98a.5.5 0 0 0 .12.64l2.03 1.58a7.43 7.43 0 0 0-.05.94c0 .32.02.63.05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.72 1.63.94l.36 2.54a.5.5 0 0 0 .49.42h3.8a.5.5 0 0 0 .49-.42l.36-2.54c.58-.22 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58z"
-								/>
-								<circle cx="12" cy="12" r="3" />
-							</svg>
+							<svg
+								viewBox="0 0 24 24"
+								fill="none"
+								xmlns="http://www.w3.org/2000/svg"
+								width="1em"
+								height="1em"
+								focusable="false"
+								aria-hidden="true"
+								><path
+									fill-rule="evenodd"
+									clip-rule="evenodd"
+									d="M8 5.07c-.8.47-1.8.46-2.6 0l-.24-.15a1.4 1.4 0 0 0-1.82.29c-.64.82-1.16 1.73-1.55 2.7a1.4 1.4 0 0 0 .66 1.71l.24.14a2.57 2.57 0 0 1 0 4.48l-.24.14a1.4 1.4 0 0 0-.66 1.72 11.1 11.1 0 0 0 1.55 2.69 1.4 1.4 0 0 0 1.82.3l.25-.15a2.57 2.57 0 0 1 3.88 2.24v.28c-.01.7.46 1.33 1.16 1.43a11 11 0 0 0 3.1 0 1.4 1.4 0 0 0 1.17-1.43v-.28a2.57 2.57 0 0 1 3.87-2.24l.25.14c.6.36 1.38.26 1.82-.29.64-.82 1.16-1.73 1.55-2.7a1.4 1.4 0 0 0-.66-1.71l-.24-.14a2.57 2.57 0 0 1 0-4.48l.24-.14a1.4 1.4 0 0 0 .66-1.72 11.08 11.08 0 0 0-1.55-2.69 1.4 1.4 0 0 0-1.82-.3l-.25.15a2.57 2.57 0 0 1-3.88-2.24v-.28c.01-.7-.46-1.33-1.16-1.43a10.99 10.99 0 0 0-3.1 0c-.7.1-1.17.72-1.17 1.43v.28C9.3 3.75 8.8 4.61 8 5.07Zm6 10.4a4 4 0 1 0-4-6.93 4 4 0 0 0 4 6.92Z"
+									fill="currentColor"
+								></path></svg
+							>
 						</button>
 					</div>
 				</div>
@@ -1246,14 +1325,14 @@
 			</div>
 		</div>
 
-			<div class="status-section">
-				<div class="stat-box">
-					<div class="stat-label">Total Items</div>
+		<div class="status-section">
+			<div class="stat-box">
+				<div class="stat-label">Total Items</div>
 				<div class="stat-value items" id="total-items">{formatAmount(totalItemAmount)}</div>
-				</div>
-				<div class="stat-box">
-					<div class="stat-label">Types</div>
-					<div class="stat-value" id="item-types">{formatNumber(typeCount)}</div>
+			</div>
+			<div class="stat-box">
+				<div class="stat-label">Types</div>
+				<div class="stat-value" id="item-types">{formatNumber(typeCount)}</div>
 			</div>
 			<div class="status-indicator">
 				<div id="status-led" class={`status-led ${online ? '' : 'offline'}`}></div>
@@ -1267,13 +1346,23 @@
 			<div class="panel-header">
 				<div class="panel-title">Network Storage</div>
 				<div class="sort-toggle">
-					<button class={`filter-btn ${sort === 'amount' ? 'active' : ''}`} type="button" on:click={() => setSort('amount')}
-						>Amount</button
+					<button
+						class={`filter-btn ${sort === 'amount' ? 'active' : ''}`}
+						type="button"
+						on:click={() => setSort('amount')}>Amount</button
 					>
-					<button class={`filter-btn ${sort === 'name' ? 'active' : ''}`} type="button" on:click={() => setSort('name')}>Name</button>
+					<button
+						class={`filter-btn ${sort === 'name' ? 'active' : ''}`}
+						type="button"
+						on:click={() => setSort('name')}>Name</button
+					>
 				</div>
 				<div class="filter-toggle">
-					<button class={`filter-btn ${filter === 'all' ? 'active' : ''}`} type="button" on:click={() => setFilter('all')}>All</button>
+					<button
+						class={`filter-btn ${filter === 'all' ? 'active' : ''}`}
+						type="button"
+						on:click={() => setFilter('all')}>All</button
+					>
 					<button
 						class={`filter-btn ${filter === 'items' ? 'active' : ''}`}
 						type="button"
@@ -1292,7 +1381,13 @@
 			</div>
 
 			<div class="search-container">
-				<svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+				<svg
+					class="search-icon"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2.5"
+				>
 					<circle cx="10" cy="10" r="6" />
 					<line x1="15" y1="15" x2="20" y2="20" />
 				</svg>
@@ -1320,7 +1415,9 @@
 					on:mouseout={onGridMouseOut}
 				>
 					{#if inventoryRenderNodes.length === 0}
-						<div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;height:200px;color:#64748b;font-size:0.9rem;">
+						<div
+							style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;height:200px;color:#64748b;font-size:0.9rem;"
+						>
 							No items found
 						</div>
 					{:else}
@@ -1357,7 +1454,11 @@
 										}
 									}}
 								>
-									<IconImage iconKey={item.iconKey} alt={displayNameFor(item)} className="item-icon" />
+									<IconImage
+										iconKey={item.iconKey}
+										alt={displayNameFor(item)}
+										className="item-icon"
+									/>
 									<span class="item-name">{displayNameFor(item)}</span>
 									<span class="item-amount">
 										{item.type === 'fluid'
@@ -1439,7 +1540,13 @@
 
 			<div class="info-card cpu-panel">
 				<div class="info-card-header">
-					<svg class="cpu-header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+					<svg
+						class="cpu-header-icon"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.5"
+					>
 						<rect x="4" y="4" width="16" height="16" rx="2" />
 						<rect x="9" y="9" width="6" height="6" />
 						<path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" />
@@ -1561,7 +1668,11 @@
 					Refresh
 				</button>
 				<label class="cpu-process-autorefresh">
-					<input type="checkbox" bind:checked={cpuProcessAutoRefresh} on:change={syncCpuProcessTimer} />
+					<input
+						type="checkbox"
+						bind:checked={cpuProcessAutoRefresh}
+						on:change={syncCpuProcessTimer}
+					/>
 					<span>Auto</span>
 				</label>
 			</div>
@@ -1635,7 +1746,9 @@
 							<div class="cpu-process-output-name">{output?.name ?? 'Unknown'}</div>
 							<div class="cpu-process-output-meta">
 								<span class="cpu-process-output-id">{output?.id ?? ''}</span>
-								<span class="cpu-process-output-elapsed">Elapsed {formatElapsedNanos(summary.elapsedTimeNanos)}</span>
+								<span class="cpu-process-output-elapsed"
+									>Elapsed {formatElapsedNanos(summary.elapsedTimeNanos)}</span
+								>
 							</div>
 						</div>
 					</div>
@@ -1779,8 +1892,8 @@
 			<div class="inventory-settings-section">
 				<div class="inventory-settings-section-title">Tag Filter</div>
 				<div class="inventory-settings-hint">
-					One regex per line. Filters by item tags (e.g. <span class="mono">forge:ores/iron</span>). In <b>All</b> view,
-					enabling this hides fluids (fluids have no tags).
+					One regex per line. Filters by item tags (e.g. <span class="mono">forge:ores/iron</span>).
+					In <b>All</b> view, enabling this hides fluids (fluids have no tags).
 				</div>
 
 				<div class="inventory-settings-grid">
@@ -1812,7 +1925,8 @@
 			<div class="inventory-settings-section">
 				<div class="inventory-settings-section-title">Categories</div>
 				<div class="inventory-settings-hint">
-					Scheme 1: first match wins (top to bottom). Each category is <b>name</b> + <b>tag regex</b>.
+					Scheme 1: first match wins (top to bottom). Each category is <b>name</b> +
+					<b>tag regex</b>.
 				</div>
 
 				{#if inventorySettingsCategories.length === 0}
@@ -1875,7 +1989,12 @@
 				</div>
 
 				<div class="inventory-settings-actions">
-					<button class="inventory-settings-add" type="button" disabled={inventorySettingsSaving} on:click={addInventoryCategoryRule}>
+					<button
+						class="inventory-settings-add"
+						type="button"
+						disabled={inventorySettingsSaving}
+						on:click={addInventoryCategoryRule}
+					>
 						Add Category
 					</button>
 				</div>
@@ -1886,10 +2005,20 @@
 			{/if}
 		</div>
 		<div class="modal-footer">
-			<button class="btn-cancel" type="button" disabled={inventorySettingsSaving} on:click={closeInventorySettingsModal}>
+			<button
+				class="btn-cancel"
+				type="button"
+				disabled={inventorySettingsSaving}
+				on:click={closeInventorySettingsModal}
+			>
 				Cancel
 			</button>
-			<button class="btn-confirm" type="button" disabled={inventorySettingsSaving} on:click={() => void saveInventorySettings()}>
+			<button
+				class="btn-confirm"
+				type="button"
+				disabled={inventorySettingsSaving}
+				on:click={() => void saveInventorySettings()}
+			>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<polyline points="20 6 9 17 4 12"></polyline>
 				</svg>
@@ -1922,15 +2051,24 @@
 			<div class="craft-item-display">
 				<div class="craft-item-icon" id="craft-icon-container">
 					{#if craftItem?.iconKey}
-						<IconImage iconKey={craftItem.iconKey} alt={displayNameFor(craftItem)} className="" lazy={false} />
+						<IconImage
+							iconKey={craftItem.iconKey}
+							alt={displayNameFor(craftItem)}
+							className=""
+							lazy={false}
+						/>
 					{:else}
 						<img src={PLACEHOLDER_ICON} alt="" />
 					{/if}
 				</div>
 				<div class="craft-item-info">
-					<div class="craft-item-name" id="craft-item-name">{craftItem ? displayNameFor(craftItem) : 'Item Name'}</div>
+					<div class="craft-item-name" id="craft-item-name">
+						{craftItem ? displayNameFor(craftItem) : 'Item Name'}
+					</div>
 					<div class="craft-item-id" id="craft-item-id">
-						{craftItem ? craftItem.id : 'minecraft:item'}{craftItem?.type === 'fluid' ? ' [Fluid]' : ''}
+						{craftItem ? craftItem.id : 'minecraft:item'}{craftItem?.type === 'fluid'
+							? ' [Fluid]'
+							: ''}
 					</div>
 				</div>
 			</div>
@@ -1951,16 +2089,30 @@
 					}}
 				/>
 				<div class="quick-amounts">
-					<button class="quick-amount-btn" type="button" on:click={() => (craftAmount = 1)}>1</button>
-					<button class="quick-amount-btn" type="button" on:click={() => (craftAmount = 16)}>16</button>
-					<button class="quick-amount-btn" type="button" on:click={() => (craftAmount = 64)}>64</button>
-					<button class="quick-amount-btn" type="button" on:click={() => (craftAmount = 256)}>256</button>
+					<button class="quick-amount-btn" type="button" on:click={() => (craftAmount = 1)}
+						>1</button
+					>
+					<button class="quick-amount-btn" type="button" on:click={() => (craftAmount = 16)}
+						>16</button
+					>
+					<button class="quick-amount-btn" type="button" on:click={() => (craftAmount = 64)}
+						>64</button
+					>
+					<button class="quick-amount-btn" type="button" on:click={() => (craftAmount = 256)}
+						>256</button
+					>
 				</div>
 			</div>
 			<div class="cpu-select-section">
 				<label for="craft-cpu-select">Target CPU</label>
 				<div class="cpu-select-wrapper">
-					<svg class="cpu-select-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+					<svg
+						class="cpu-select-icon"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.5"
+					>
 						<rect x="4" y="4" width="16" height="16" rx="2" />
 						<rect x="9" y="9" width="6" height="6" />
 						<path d="M9 1v3M15 1v3M9 20v3M15 20v3" />
@@ -1973,15 +2125,28 @@
 							<option value={cpu.name ?? ''}>{cpuName}{status}</option>
 						{/each}
 					</select>
-					<svg class="cpu-select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<svg
+						class="cpu-select-arrow"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+					>
 						<polyline points="6 9 12 15 18 9" />
 					</svg>
 				</div>
 			</div>
 		</div>
 		<div class="modal-footer">
-			<button id="craft-cancel-btn" class="btn-cancel" type="button" on:click={closeCraftModal}>Cancel</button>
-			<button id="craft-confirm-btn" class="btn-confirm" type="button" on:click={() => void confirmCraft()}>
+			<button id="craft-cancel-btn" class="btn-cancel" type="button" on:click={closeCraftModal}
+				>Cancel</button
+			>
+			<button
+				id="craft-confirm-btn"
+				class="btn-confirm"
+				type="button"
+				on:click={() => void confirmCraft()}
+			>
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<polyline points="20 6 9 17 4 12"></polyline>
 				</svg>
@@ -1991,24 +2156,39 @@
 	</div>
 </div>
 
-<div id="ae2web-tooltip" class="ae2web-tooltip" style:display={tooltipVisible ? 'block' : 'none'} bind:this={tooltipEl}>
+<div
+	id="ae2web-tooltip"
+	class="ae2web-tooltip"
+	style:display={tooltipVisible ? 'block' : 'none'}
+	bind:this={tooltipEl}
+>
 	{#each tooltipHtmlLines as line, i (i)}
 		<div class="ae2web-tooltip-line">{@html line}</div>
 	{/each}
 </div>
 
-<div id="login-modal" class="modal-overlay" class:active={needsLogin} role="dialog" aria-modal="true">
+<div
+	id="login-modal"
+	class="modal-overlay"
+	class:active={needsLogin}
+	role="dialog"
+	aria-modal="true"
+>
 	<div class="modal-content login-modal">
 		<div class="modal-header">
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-				<path d="M12 2a7 7 0 0 0-7 7v4a2 2 0 0 0 2 2h1v3a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-3h1a2 2 0 0 0 2-2V9a7 7 0 0 0-7-7z" />
+				<path
+					d="M12 2a7 7 0 0 0-7 7v4a2 2 0 0 0 2 2h1v3a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-3h1a2 2 0 0 0 2-2V9a7 7 0 0 0-7-7z"
+				/>
 				<path d="M9 11h6" />
 			</svg>
 			<h3>Enter Token</h3>
 		</div>
 		<div class="modal-body">
 			<div class="login-hint">
-				Get your personal token in-game: right-click the Web Terminal block, or run <span class="mono">/ae2web token</span>.
+				Get your personal token in-game: right-click the Web Terminal block, or run <span
+					class="mono">/ae2web token</span
+				>.
 			</div>
 			<input
 				class="login-input"

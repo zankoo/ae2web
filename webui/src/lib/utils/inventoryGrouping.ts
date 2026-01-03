@@ -83,8 +83,9 @@ export function buildInventoryRenderNodes(
 
 			visible = visible.filter((x) => {
 				if (x.type !== 'item') {
-					// In All view, active tag filter hides fluids (they have no tags).
-					return false;
+					// Fluids have no tags: hide only if whitelist is active (whitelist = show only matching)
+					// Blacklist alone should not hide fluids (they can't match any blacklist pattern)
+					return whitelist.length === 0;
 				}
 				return passesTagFilter(x, whitelist, blacklist);
 			});

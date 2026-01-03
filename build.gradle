@@ -209,9 +209,17 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test').configure {
     useJUnitPlatform()
-    systemProperty 'ae2web.prerender.storageRoot', new File(buildDir, 'test-prerender').absolutePath
+    def tmpDir = new File(projectDir, '.tmp')
+    systemProperty 'java.io.tmpdir', tmpDir.absolutePath
+    systemProperty 'ae2web.prerender.storageRoot', new File(tmpDir, 'test-prerender').absolutePath
+    systemProperty 'ae2web.inventoryConfig.storageRoot', new File(tmpDir, 'inventory-config').absolutePath
+    systemProperty 'ae2web.players.storageRoot', new File(tmpDir, 'players').absolutePath
 }
 
 tasks.named('check').configure {
     dependsOn(tasks.named('webuiTest'))
+}
+
+tasks.named('clean').configure {
+    delete file('.tmp')
 }

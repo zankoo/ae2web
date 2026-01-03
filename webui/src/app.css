@@ -160,6 +160,7 @@ body {
     background: var(--ae2-btn-hover);
 }
 
+
 .network-icon {
     width: 20px;
     height: 20px;
@@ -206,12 +207,12 @@ body {
 }
 
 .network-settings-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(0, 0, 0, 0.18);
-    color: rgba(255, 255, 255, 0.82);
+    width: 24px;
+    height: 24px;
+    border-radius: 2px;
+    border: 1px solid var(--ae2-border);
+    background: var(--ae2-btn-bg);
+    color: var(--ae2-text);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -220,19 +221,26 @@ body {
 }
 
 .network-settings-btn svg {
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
 }
 
 .network-settings-btn:hover:not(:disabled) {
-    border-color: rgba(34, 211, 238, 0.55);
-    color: var(--ae2-cyan);
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.10), var(--shadow-btn);
+    background: var(--ae2-btn-hover);
+    color: var(--ae2-text);
+}
+
+.network-settings-btn:active:not(:disabled) {
+    background: #ccc;
+    box-shadow: var(--shadow-slot);
+    transform: translateY(1px);
 }
 
 .network-settings-btn:disabled {
     opacity: 0.5;
-    cursor: not-allowed;
+    cursor: default;
+    background: var(--ae2-btn-bg);
+    box-shadow: var(--shadow-btn);
 }
 
 .ae2-select-trigger {
@@ -1046,9 +1054,9 @@ button.cpu-card:disabled {
 
 .inventory-settings-section {
     padding: 12px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.14);
+    border: 1px solid var(--ae2-border);
+    border-radius: 4px;
+    background: var(--ae2-btn-bg);
 }
 
 .inventory-settings-section-title {
@@ -1085,11 +1093,11 @@ button.cpu-card:disabled {
 .inventory-settings-textarea {
     width: 100%;
     padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(0, 0, 0, 0.22);
+    border-radius: 2px;
+    border: 1px solid var(--ae2-border-dim);
+    background: var(--ae2-slot);
     box-shadow: var(--shadow-input);
-    color: var(--ae2-text);
+    color: #fff;
     font-family: var(--font-mono);
     letter-spacing: 0.02em;
     resize: vertical;
@@ -1097,8 +1105,8 @@ button.cpu-card:disabled {
 
 .inventory-settings-textarea:focus {
     outline: none;
-    border-color: rgba(34, 211, 238, 0.65);
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.18), var(--shadow-input);
+    border-color: #fff;
+    box-shadow: var(--shadow-input);
 }
 
 .inventory-settings-empty {
@@ -1107,9 +1115,9 @@ button.cpu-card:disabled {
     color: var(--ae2-text-dim);
     font-size: 0.82rem;
     padding: 10px 12px;
-    border: 1px dashed rgba(255, 255, 255, 0.22);
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.12);
+    border: 1px dashed var(--ae2-border-dim);
+    border-radius: 4px;
+    background: var(--ae2-slot);
 }
 
 .inventory-settings-categories {
@@ -1126,9 +1134,9 @@ button.cpu-card:disabled {
 }
 
 .inventory-settings-category-row.drag-over {
-    outline: 1px solid rgba(34, 211, 238, 0.35);
-    outline-offset: 4px;
-    border-radius: 12px;
+    outline: 1px solid var(--ae2-cyan);
+    outline-offset: 2px;
+    border-radius: 4px;
 }
 
 .inventory-settings-category-row.dragging {
@@ -1139,11 +1147,11 @@ button.cpu-card:disabled {
     width: 32px;
     height: 38px;
     padding: 0;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(0, 0, 0, 0.20);
-    box-shadow: var(--shadow-input);
-    color: rgba(255, 255, 255, 0.72);
+    border-radius: 2px;
+    border: 1px solid var(--ae2-border);
+    background: var(--ae2-btn-bg);
+    box-shadow: var(--shadow-btn);
+    color: var(--ae2-text-dim);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1157,9 +1165,8 @@ button.cpu-card:disabled {
 }
 
 .inventory-settings-category-handle:hover:not(:disabled) {
-    border-color: rgba(34, 211, 238, 0.55);
-    color: var(--ae2-cyan);
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.10), var(--shadow-input);
+    background: var(--ae2-btn-hover);
+    color: var(--ae2-text);
 }
 
 .inventory-settings-category-handle:active:not(:disabled) {
@@ -1175,11 +1182,11 @@ button.cpu-card:disabled {
 .inventory-settings-input {
     width: 100%;
     padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(0, 0, 0, 0.22);
+    border-radius: 2px;
+    border: 1px solid var(--ae2-border-dim);
+    background: var(--ae2-slot);
     box-shadow: var(--shadow-input);
-    color: var(--ae2-text);
+    color: #fff;
 }
 
 .inventory-settings-input.mono {
@@ -1188,23 +1195,25 @@ button.cpu-card:disabled {
 
 .inventory-settings-input:focus {
     outline: none;
-    border-color: rgba(34, 211, 238, 0.65);
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.18), var(--shadow-input);
+    border-color: #fff;
+    box-shadow: var(--shadow-input);
 }
 
 .inventory-settings-remove {
     padding: 8px 12px;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(0, 0, 0, 0.20);
-    color: rgba(255, 255, 255, 0.85);
+    border-radius: 2px;
+    border: 1px solid var(--ae2-border);
+    background: var(--ae2-btn-bg);
+    color: var(--ae2-text);
     font-weight: 800;
     cursor: pointer;
+    box-shadow: var(--shadow-btn);
 }
 
 .inventory-settings-remove:hover:not(:disabled) {
-    border-color: rgba(248, 113, 113, 0.55);
-    box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.12);
+    background: var(--ae2-btn-hover);
+    color: var(--ae2-danger);
+    box-shadow: var(--shadow-btn);
 }
 
 .inventory-settings-actions {
@@ -1214,31 +1223,33 @@ button.cpu-card:disabled {
 }
 
 .inventory-settings-add {
-    background: rgba(0, 0, 0, 0.20);
-    border: 1px solid rgba(255, 255, 255, 0.20);
+    background: var(--ae2-btn-bg);
+    border: 1px solid var(--ae2-border);
     color: var(--ae2-text);
-    border-radius: 10px;
+    border-radius: 2px;
     padding: 10px 14px;
     font-weight: 900;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     font-size: 0.72rem;
     cursor: pointer;
+    box-shadow: var(--shadow-btn);
 }
 
 .inventory-settings-add:hover:not(:disabled) {
-    border-color: rgba(34, 211, 238, 0.55);
-    color: var(--ae2-cyan);
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.10);
+    background: var(--ae2-btn-hover);
+    color: var(--ae2-text);
 }
 
 .inventory-settings-error {
-    color: rgba(248, 113, 113, 0.95);
+    color: var(--ae2-text);
     font-size: 0.9rem;
     padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid rgba(248, 113, 113, 0.25);
-    background: rgba(248, 113, 113, 0.08);
+    border-radius: 4px;
+    border: 1px solid var(--ae2-danger);
+    background: var(--ae2-danger);
+    color: #fff;
+    box-shadow: var(--shadow-btn);
 }
 
 @media (max-width: 720px) {
@@ -1310,15 +1321,16 @@ button.cpu-card:disabled {
 }
 
 .cpu-process-action {
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: var(--ae2-btn-bg);
+    border: 1px solid var(--ae2-border);
     color: var(--ae2-text);
-    border-radius: 6px;
+    border-radius: 2px;
     padding: 6px 10px;
     font-weight: 800;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     font-size: 0.72rem;
+    box-shadow: var(--shadow-btn);
 }
 
 .cpu-process-action:disabled {
@@ -1344,30 +1356,31 @@ button.cpu-card:disabled {
     display: flex;
     gap: 8px;
     padding: 10px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(0, 0, 0, 0.12);
+    border-bottom: 2px solid var(--ae2-border);
+    background: var(--ae2-panel-light);
     flex: 0 0 auto;
     overflow-x: auto;
 }
 
 .cpu-process-tab {
-    background: rgba(0, 0, 0, 0.15);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 999px;
+    background: var(--ae2-btn-bg);
+    border: 1px solid #fff;
+    border-radius: 2px;
     padding: 6px 10px;
     font-weight: 900;
     font-size: 0.72rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.78);
+    color: var(--ae2-text);
     white-space: nowrap;
+    box-shadow: var(--shadow-btn);
 }
 
 .cpu-process-tab.active {
     color: #fff;
-    border-color: rgba(34, 211, 238, 0.5);
-    background: rgba(34, 211, 238, 0.12);
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.06);
+    border-color: var(--ae2-border-dim);
+    background: var(--ae2-slot);
+    box-shadow: var(--shadow-slot);
 }
 
 .cpu-process-body {
@@ -1403,9 +1416,9 @@ button.cpu-card:disabled {
 .cpu-process-empty {
     color: var(--ae2-text-dim);
     padding: 14px;
-    border: 1px dashed rgba(255, 255, 255, 0.22);
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.12);
+    border: 1px dashed var(--ae2-border-dim);
+    border-radius: 4px;
+    background: var(--ae2-slot);
     font-family: var(--font-mono);
 }
 
@@ -1414,9 +1427,10 @@ button.cpu-card:disabled {
     grid-template-columns: 1fr;
     gap: 10px;
     padding: 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: linear-gradient(180deg, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0.14));
+    border-radius: 4px;
+    border: 2px solid var(--ae2-border);
+    background: var(--ae2-panel-light);
+    box-shadow: var(--shadow-gui);
 }
 
 @media (min-width: 720px) {
@@ -1437,11 +1451,12 @@ button.cpu-card:disabled {
     width: 44px;
     height: 44px;
     flex: 0 0 auto;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background: rgba(0, 0, 0, 0.18);
+    border-radius: 2px;
+    border: 1px solid var(--ae2-border-dim);
+    background: var(--ae2-slot);
     display: grid;
     place-items: center;
+    box-shadow: var(--shadow-slot);
 }
 
 .cpu-process-output-icon-img {
@@ -1512,10 +1527,11 @@ button.cpu-card:disabled {
 
 .cpu-process-filter {
     flex: 1 1 auto;
-    background: rgba(0, 0, 0, 0.18);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    color: var(--ae2-text);
-    border-radius: 10px;
+    background: var(--ae2-slot);
+    border: 1px solid var(--ae2-border-dim);
+    color: #fff;
+    border-radius: 2px;
+    box-shadow: var(--shadow-input);
     padding: 10px 12px;
     font-family: var(--font-mono);
     font-size: 0.86rem;
@@ -1523,8 +1539,8 @@ button.cpu-card:disabled {
 }
 
 .cpu-process-filter:focus {
-    border-color: rgba(34, 211, 238, 0.55);
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.08);
+    border-color: #fff;
+    box-shadow: var(--shadow-input);
 }
 
 .cpu-process-count {
@@ -1538,9 +1554,10 @@ button.cpu-card:disabled {
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background: rgba(0, 0, 0, 0.12);
+    border-radius: 4px;
+    border: 1px solid var(--ae2-border-dim);
+    background: var(--ae2-slot);
+    box-shadow: var(--shadow-slot);
 }
 
 .cpu-process-table {
@@ -1555,15 +1572,17 @@ button.cpu-card:disabled {
     vertical-align: middle;
 }
 
-.cpu-process-table thead th {
+.cpu-process-table-wrap thead th {
     position: sticky;
     top: 0;
-    background: rgba(0, 0, 0, 0.36);
-    backdrop-filter: blur(6px);
+    background: var(--ae2-panel-dark);
+    /* backdrop-filter: blur(6px); removed */
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.7);
+    color: #fff;
+    padding: 8px 12px;
+    text-align: left;
 }
 
 .cpu-process-table th.num,

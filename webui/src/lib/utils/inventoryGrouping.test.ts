@@ -103,11 +103,18 @@ describe('inventoryGrouping', () => {
 		expect(headers).toContain('Fluids');
 	});
 
-	it('hides fluids in All view when tag filter is active (fluids have no tags)', () => {
+	it('hides fluids in All view when whitelist is active (fluids have no tags)', () => {
 		const items = [item('minecraft:stone', ['forge:ores/iron']), fluid('minecraft:water')];
 		const nodes = buildInventoryRenderNodes(items, 'all', cfg({ whitelist: ['^forge:ores/'] }));
 		const fluidItems = nodes.filter((n) => n.kind === 'item').map((n: any) => n.item).filter((x: any) => x.type === 'fluid');
 		expect(fluidItems).toHaveLength(0);
+	});
+
+	it('shows fluids in All view when only blacklist is active', () => {
+		const items = [item('minecraft:stone', ['forge:ores/iron']), fluid('minecraft:water')];
+		const nodes = buildInventoryRenderNodes(items, 'all', cfg({ blacklist: ['^forge:ores/'] }));
+		const fluidItems = nodes.filter((n) => n.kind === 'item').map((n: any) => n.item).filter((x: any) => x.type === 'fluid');
+		expect(fluidItems).toHaveLength(1);
 	});
 
 	it('applies whitelist/blacklist to items by tag', () => {
