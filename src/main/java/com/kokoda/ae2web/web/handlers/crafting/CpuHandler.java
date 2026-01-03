@@ -9,13 +9,16 @@ import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import com.kokoda.ae2web.util.IconKeyUtils;
+import com.kokoda.ae2web.web.inventory.InventoryNameUtils;
 import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import net.minecraft.core.BlockPos;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -59,6 +62,7 @@ public final class CpuHandler {
 
     private static Map<String, Object> cpuToJson(ICraftingCPU cpu) {
         Map<String, Object> info = new HashMap<>();
+        info.put("cpuId", cpuIdOf(cpu));
         info.put("busy", cpu.isBusy());
         info.put("availableStorage", cpu.getAvailableStorage());
         info.put("coProcessors", cpu.getCoProcessors());
@@ -87,20 +91,58 @@ public final class CpuHandler {
         return info;
     }
 
-    private static Map<String, Object> genericStackToJson(GenericStack stack, PrerenderStorageService storage) {
+    public static String cpuIdOf(ICraftingCPU cpu) {
+        if (cpu == null) {
+            return "";
+        }
+
+        String boundsId = readBoundsCpuId(cpu);
+        if (boundsId != null) {
+            return boundsId;
+        }
+
+        String name = cpu.getName() != null ? cpu.getName().getString() : "";
+        String mode = cpu.getSelectionMode() != null ? cpu.getSelectionMode().toString() : "";
+        int identity = System.identityHashCode(cpu);
+        return "fallback:name=" + name + "|storage=" + cpu.getAvailableStorage()
+                + "|coproc=" + cpu.getCoProcessors() + "|mode=" + mode + "|h=" + Integer.toHexString(identity);
+    }
+
+    private static String readBoundsCpuId(ICraftingCPU cpu) {
+        try {
+            Method minMethod = cpu.getClass().getMethod("getBoundsMin");
+            Method maxMethod = cpu.getClass().getMethod("getBoundsMax");
+            Object minObj = minMethod.invoke(cpu);
+            Object maxObj = maxMethod.invoke(cpu);
+            if (!(minObj instanceof BlockPos min)) {
+                return null;
+            }
+            if (!(maxObj instanceof BlockPos max)) {
+                return null;
+            }
+            return "bounds:" + min.getX() + "," + min.getY() + "," + min.getZ()
+                    + "~" + max.getX() + "," + max.getY() + "," + max.getZ();
+        } catch (ReflectiveOperationException e) {
+            return null;
+        }
+    }
+
+    public static Map<String, Object> genericStackToJson(GenericStack stack) {
+        return genericStackToJson(stack, PrerenderStorageService.getInstance());
+    }
+
+    static Map<String, Object> genericStackToJson(GenericStack stack, PrerenderStorageService storage) {
         AEKey key = stack.what();
         String name;
         String translationKey = null;
         if (key instanceof AEItemKey itemKey) {
             translationKey = itemKey.getItem().getDescriptionId();
-            String translation = storage.getTranslation(IconKeyUtils.iconKey(itemKey));
-            name = translation != null ? translation : itemKey.getDisplayName().getString();
+            name = InventoryNameUtils.getTranslatedName(itemKey, storage);
         } else if (key instanceof AEFluidKey fluidKey) {
             translationKey = fluidKey.getFluid().getFluidType().getDescriptionId();
-            String translation = storage.getTranslation(IconKeyUtils.iconKey(fluidKey));
-            name = translation != null ? translation : fluidKey.getDisplayName().getString();
+            name = InventoryNameUtils.getFluidName(fluidKey, storage);
         } else {
-            name = key.getDisplayName().getString();
+            name = InventoryNameUtils.stripMinecraftFormatting(key.getDisplayName().getString());
         }
         return Map.of(
                 "id", key.getId().toString(),
@@ -130,7 +172,7 @@ public final class CpuHandler {
         return new OutputProgress(total, done, clampedRemaining);
     }
 
-    private static Long readFinalOutputRemainingFromCpu(ICraftingCPU cpu) {
+    static Long readFinalOutputRemainingFromCpu(ICraftingCPU cpu) {
         Object job = readCpuExecutingJob(cpu);
         if (job == null) {
             return null;
@@ -149,7 +191,7 @@ public final class CpuHandler {
         }
     }
 
-    private static Long readFinalOutputTotalFromCpu(ICraftingCPU cpu) {
+    static Long readFinalOutputTotalFromCpu(ICraftingCPU cpu) {
         Object job = readCpuExecutingJob(cpu);
         if (job == null) {
             return null;
@@ -174,7 +216,7 @@ public final class CpuHandler {
         }
     }
 
-    private static Object readCpuExecutingJob(ICraftingCPU cpu) {
+    static Object readCpuExecutingJob(ICraftingCPU cpu) {
         if (cpu == null) {
             return null;
         }

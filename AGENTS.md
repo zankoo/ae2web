@@ -135,6 +135,7 @@ Base: `/api/*`
 - `GET /api/events/inventory?terminalId=<id>&token=<token?>` → SSE events (`hello`, `inventory`)
 - `POST /api/craft` → crafting requests (see `CraftRequestHandler`)
 - `GET /api/cpus` → crafting CPU status
+- `GET /api/cpus/process?terminalId=<id>&cpuId=<cpuId>` → crafting CPU process (entries + patterns; list/tree views)
 
 Prerender endpoints (server-side storage under `config/ae2web/prerender/`):
 - `GET /api/prerender/image?id=<iconKey>` → `image/png` or `404`
@@ -248,6 +249,12 @@ Item format: short verb phrase + optional owner and ID. Update status by moving 
 ## Diagnostics: NBT 图标/翻译渲染失败
 
 目标：用 API 明确问题发生在「UI 请求」「服务端存储」「客户端 prerender 上传」哪一层。
+
+### Client/Server Logs (Windows 路径)
+
+服务端日志位置（用户本机 Windows）：`/mnt/c/Users/zhuqi/Downloads/GregTech-Leisure-server-1.4.4.8/logs/latest.log`
+
+客户端日志位置（用户本机 Windows）：`/mnt/c/Users/zhuqi/Downloads/PCL2/.minecraft/versions/GregTech Leisure/logs/latest.log`
 
 ### 1) 在 WSL 访问 Windows 上的 HTTP Server
 

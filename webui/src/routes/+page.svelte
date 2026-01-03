@@ -4,25 +4,44 @@
 	import debounce from 'lodash-es/debounce';
 
 	import { fetchCpus } from '$lib/api/cpus';
+	import { fetchCpuProcess } from '$lib/api/cpuProcess';
 	import { submitCraft } from '$lib/api/craft';
-		import { openInventorySse, type InventoryFilter } from '$lib/api/inventory';
+	import { openInventorySse, type InventoryFilter } from '$lib/api/inventory';
+	import { fetchInventoryViewConfig, saveInventoryViewConfig } from '$lib/api/userConfig';
 	import { fetchTooltip } from '$lib/api/prerender';
 	import { fetchStatus } from '$lib/api/status';
 	import { fetchTerminals } from '$lib/api/terminals';
-	import type { CpuDto, InventoryItem, TerminalInfo } from '$lib/api/types';
+	import type {
+		CpuDto,
+		CpuProcessEntryDto,
+		CpuProcessResponse,
+		GenericStackDto,
+		InventoryItem,
+		InventoryViewConfig,
+		TerminalInfo
+	} from '$lib/api/types';
 	import IconImage from '$lib/components/IconImage.svelte';
+	import CpuDependencyTree from '$lib/components/CpuProcess/CpuDependencyTree.svelte';
+	import CpuProcessTreeRow from '$lib/components/CpuProcess/CpuProcessTreeRow.svelte';
 	import ToastHost from '$lib/components/ToastHost.svelte';
+	import { authToken, setAuthToken } from '$lib/stores/session';
 	import { showToast } from '$lib/stores/toast';
 	import { PLACEHOLDER_ICON } from '$lib/constants';
-	import { formatAmount, formatNumber } from '$lib/utils/format';
-	import { computeFlipDuration, type SortMode } from '$lib/utils/flip';
-	import { playFlipAnimation, type FlipPosition } from '$lib/utils/flipAnimation';
+	import { formatAmount, formatFluidAmount, formatNumber } from '$lib/utils/format';
+	import { arrayMove } from '$lib/utils/arrayMove';
+	import { buildInventoryRenderNodes, type InventoryRenderNode } from '$lib/utils/inventoryGrouping';
 	import { sortInventoryItems } from '$lib/utils/inventorySort';
 	import { legacyTextToHtml } from '$lib/utils/minecraftText';
 	import { matchItem } from '$lib/utils/pinyin';
 	import { createTooltipPositioner, type TooltipPositioner } from '$lib/utils/tooltipPositioner';
 
+	type SortMode = 'amount' | 'name';
+
 	let online = false;
+	let loginTokenValue = '';
+	let loginError: string | null = null;
+	$: needsLogin = !$authToken || !$authToken.trim();
+	let appCleanup: (() => void) | null = null;
 
 	let terminals: TerminalInfo[] = [];
 	let terminalId = '';
@@ -47,22 +66,60 @@
 		let inventoryEventSource: EventSource | null = null;
 		let lastInventoryEventVersion: number | null = null;
 
-		let inventoryState = new Map<string, InventoryItem>();
-		let inventoryStateDirty = false;
-		let inventoryStateAnimate = false;
-		let inventoryStateFlushInFlight = false;
-		let inventoryStateFlushPending = false;
+			let inventoryState = new Map<string, InventoryItem>();
+			let inventoryStateDirty = false;
+			let inventoryStateFlushInFlight = false;
+			let inventoryStateFlushPending = false;
 
 		let inventoryScrollActive = false;
 		let inventoryScrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 		let cpus: CpuDto[] = [];
+		let inventoryViewConfig: InventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
+		let inventoryViewConfigTerminalId: string | null = null;
+		let inventoryRenderNodes: InventoryRenderNode[] = [];
+
+		let inventorySettingsOpen = false;
+		let inventorySettingsOverlayEl: HTMLDivElement | null = null;
+		let inventorySettingsTerminalId: string | null = null;
+		let inventorySettingsTerminalName: string | null = null;
+		let inventorySettingsWhitelistText = '';
+		let inventorySettingsBlacklistText = '';
+		type InventoryCategoryDraft = { id: string; name: string; tagRegex: string };
+		let inventorySettingsCategories: InventoryCategoryDraft[] = [];
+		let inventorySettingsCategoryIdSeq = 0;
+		let inventorySettingsCategoryDragId: string | null = null;
+		let inventorySettingsCategoryDragOverId: string | null = null;
+		let inventorySettingsSaving = false;
+		let inventorySettingsError: string | null = null;
 
 	let craftOpen = false;
 	let craftItem: InventoryItem | null = null;
 	let craftAmount = 1;
 	let craftCpuName = '';
 	let craftOverlayEl: HTMLDivElement | null = null;
+
+	type CpuProcessView = 'list' | 'statusTree' | 'dependencyTree';
+
+	let cpuProcessOpen = false;
+	let cpuProcessOverlayEl: HTMLDivElement | null = null;
+	let cpuProcessCpuId: string | null = null;
+	let cpuProcessCpuName: string | null = null;
+	let cpuProcessView: CpuProcessView = 'list';
+	let cpuProcessAutoRefresh = true;
+	let cpuProcessCompletionNotified = false;
+	let cpuProcessLoading = false;
+	let cpuProcessError: string | null = null;
+	let cpuProcessData: CpuProcessResponse | null = null;
+	let cpuProcessFilter = '';
+	let cpuProcessTimer: number | null = null;
+
+	let cpuProcessEntries: CpuProcessEntryDto[] = [];
+	let cpuProcessFilterTerm = '';
+	let cpuProcessEntriesFiltered: CpuProcessEntryDto[] = [];
+	let cpuProcessEntriesActive: CpuProcessEntryDto[] = [];
+	let cpuProcessEntriesWaiting: CpuProcessEntryDto[] = [];
+	let cpuProcessEntriesStored: CpuProcessEntryDto[] = [];
 
 	const tooltipCache = new Map<string, string[]>();
 	let tooltipEl: HTMLDivElement | null = null;
@@ -74,13 +131,9 @@
 	let tooltipLastY = 0;
 	let tooltipHasLastPos = false;
 
-		function prefersReducedMotion(): boolean {
-			return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
-		}
-
-		async function flushInventoryState(): Promise<void> {
-			if (document.hidden) return;
-			if (!inventoryStateDirty) return;
+			async function flushInventoryState(): Promise<void> {
+				if (document.hidden) return;
+				if (!inventoryStateDirty) return;
 			if (inventoryScrollActive) {
 				inventoryStateFlushPending = true;
 				return;
@@ -93,23 +146,18 @@
 			inventoryStateFlushInFlight = true;
 			try {
 				const nextItems = Array.from(inventoryState.values());
-				const nextVisible = computeVisible(nextItems);
+					const nextVisible = computeVisible(nextItems);
 
-				const positionChanged = sort === 'amount' && hasPositionChanged(visibleItems, nextVisible);
-				const preserveAnchor = positionChanged;
-				let duration = 0;
-				if (inventoryStateAnimate && positionChanged) {
-					duration = computeFlipDuration(sort, 0, true, { maxItems: Number.POSITIVE_INFINITY });
-				}
+					const positionChanged = sort === 'amount' && hasPositionChanged(visibleItems, nextVisible);
+					const preserveAnchor = positionChanged;
 
-				inventoryItems = nextItems;
-				inventoryStateDirty = false;
-				inventoryStateAnimate = false;
-				await applyVisibleItems(nextVisible, preserveAnchor, duration);
-			} finally {
-				inventoryStateFlushInFlight = false;
-				if (inventoryStateFlushPending && !inventoryScrollActive && !document.hidden) {
-					inventoryStateFlushPending = false;
+					inventoryItems = nextItems;
+					inventoryStateDirty = false;
+					await applyVisibleItems(nextVisible, preserveAnchor);
+				} finally {
+					inventoryStateFlushInFlight = false;
+					if (inventoryStateFlushPending && !inventoryScrollActive && !document.hidden) {
+						inventoryStateFlushPending = false;
 					void flushInventoryState();
 				}
 			}
@@ -145,13 +193,12 @@
 		return item.id;
 	}
 
-		function stopInventoryEventStream(): void {
-			lastInventoryEventVersion = null;
-			inventoryStateDirty = false;
-			inventoryStateAnimate = false;
-			inventoryStateFlushInFlight = false;
-			inventoryStateFlushPending = false;
-			if (inventoryScrollTimer) {
+			function stopInventoryEventStream(): void {
+				lastInventoryEventVersion = null;
+				inventoryStateDirty = false;
+				inventoryStateFlushInFlight = false;
+				inventoryStateFlushPending = false;
+				if (inventoryScrollTimer) {
 				clearTimeout(inventoryScrollTimer);
 				inventoryScrollTimer = null;
 			}
@@ -176,14 +223,13 @@
 				onSnapshot: (msg) => {
 					if (msg.terminalId && msg.terminalId !== terminalId) return;
 
-					const items = Array.isArray(msg.items) ? msg.items : [];
-					inventoryState = new Map(items.map((item) => [item.uniqueId, item]));
-					inventoryStateDirty = true;
-					inventoryStateAnimate = false;
-					lastInventoryEventVersion = msg.version ?? lastInventoryEventVersion;
-					void flushInventoryState();
-				},
-				onDelta: (msg) => {
+						const items = Array.isArray(msg.items) ? msg.items : [];
+						inventoryState = new Map(items.map((item) => [item.uniqueId, item]));
+						inventoryStateDirty = true;
+						lastInventoryEventVersion = msg.version ?? lastInventoryEventVersion;
+						void flushInventoryState();
+					},
+					onDelta: (msg) => {
 					if (msg.terminalId && msg.terminalId !== terminalId) return;
 					if (msg.version == null) return;
 					if (lastInventoryEventVersion == null) return;
@@ -193,13 +239,11 @@
 						return;
 					}
 
-					lastInventoryEventVersion = msg.version;
+						lastInventoryEventVersion = msg.version;
 
-					let shouldAnimate = false;
-
-					const removed = Array.isArray(msg.removed) ? msg.removed : [];
-					for (const id of removed) {
-						inventoryState.delete(id);
+						const removed = Array.isArray(msg.removed) ? msg.removed : [];
+						for (const id of removed) {
+							inventoryState.delete(id);
 					}
 
 					const added = Array.isArray(msg.added) ? msg.added : [];
@@ -208,37 +252,37 @@
 						inventoryState.set(item.uniqueId, item);
 					}
 
-					const updated = Array.isArray(msg.updated) ? msg.updated : [];
-					for (const patch of updated) {
-						const prev = inventoryState.get(patch.uniqueId);
-						if (!prev) continue;
+						const updated = Array.isArray(msg.updated) ? msg.updated : [];
+						for (const patch of updated) {
+							const prev = inventoryState.get(patch.uniqueId);
+							if (!prev) continue;
 
-						if (sort === 'amount' && patch.amount !== prev.amount) {
-							shouldAnimate = true;
-						}
-
-						const nextName = typeof patch.name === 'string' && patch.name.trim() ? patch.name : prev.name;
-						inventoryState.set(patch.uniqueId, {
-							...prev,
+							const nextName = typeof patch.name === 'string' && patch.name.trim() ? patch.name : prev.name;
+							inventoryState.set(patch.uniqueId, {
+								...prev,
 							amount: patch.amount,
 							craftable: patch.craftable,
 							name: nextName
 						});
-					}
+						}
 
-					inventoryStateDirty = true;
-					inventoryStateAnimate = shouldAnimate;
-					void flushInventoryState();
-				}
-			});
-		}
+						inventoryStateDirty = true;
+						void flushInventoryState();
+					}
+				});
+			}
 
 	async function checkConnection(): Promise<void> {
 		try {
 			await fetchStatus();
 			online = true;
-		} catch {
+		} catch (e) {
 			online = false;
+			const message = e instanceof Error ? e.message : '';
+			if (message.toLowerCase().includes('unauthorized') || message.includes('HTTP 401')) {
+				showToast('Invalid token', 'error');
+				setAuthToken('');
+			}
 		}
 	}
 
@@ -275,6 +319,7 @@
 				if (terminalId !== previous) {
 					await loadCpus();
 					startInventoryEventStream();
+					await loadInventoryViewConfigForTerminal(terminalId);
 				}
 			} catch (e) {
 				console.error('Failed to load terminals', e);
@@ -328,84 +373,11 @@
 		} catch {
 			// ignore
 		}
-		return 0;
-	}
-
-	function captureFlipPositions(elements: Iterable<HTMLElement>): Map<string, FlipPosition> {
-		const out = new Map<string, FlipPosition>();
-		for (const el of elements) {
-			const id = el.dataset.itemId;
-			if (!id) continue;
-			const rect = el.getBoundingClientRect();
-			out.set(id, { left: rect.left, top: rect.top });
-		}
-		return out;
-	}
-
-	function getAnimatableSlots({ maxSlots = 400, overscanRows = 2 }: { maxSlots?: number; overscanRows?: number } = {}): HTMLElement[] {
-		if (!inventoryGridEl || !inventoryScrollEl) return [];
-
-		const nodes = inventoryGridEl.querySelectorAll('.item-slot') as NodeListOf<HTMLElement>;
-		const total = nodes.length;
-		if (total === 0) return [];
-
-		const first = nodes[0];
-		const firstRect = first.getBoundingClientRect();
-		const firstTop = firstRect.top;
-
-		let columns = 1;
-		for (let i = 1; i < total && i < 64; i++) {
-			const rect = nodes[i].getBoundingClientRect();
-			if (Math.abs(rect.top - firstTop) > 0.5) break;
-			columns += 1;
-		}
-		if (columns < 1) columns = 1;
-
-		let rowStep = firstRect.height || 64;
-		if (total > columns) {
-			const secondRowTop = nodes[columns].getBoundingClientRect().top;
-			const step = secondRowTop - firstTop;
-			if (Number.isFinite(step) && Math.abs(step) > 0.5) {
-				rowStep = Math.abs(step);
-			}
+			return 0;
 		}
 
-		const scrollTop = inventoryScrollEl.scrollTop;
-		const viewportHeight = inventoryScrollEl.clientHeight;
-		const scrollRect = inventoryScrollEl.getBoundingClientRect();
-		const firstOffset = firstRect.top - scrollRect.top + scrollTop;
-
-		const overscanPx = rowStep * overscanRows;
-		let startRow = Math.floor((scrollTop - overscanPx - firstOffset) / rowStep);
-		let endRow = Math.floor((scrollTop + viewportHeight + overscanPx - firstOffset) / rowStep);
-
-		if (!Number.isFinite(startRow)) startRow = 0;
-		if (!Number.isFinite(endRow)) endRow = startRow;
-
-		startRow = Math.max(0, startRow);
-		endRow = Math.max(startRow, endRow);
-
-		let startIndex = startRow * columns;
-		let endIndex = Math.min(total, (endRow + 1) * columns);
-
-		startIndex = Math.max(0, Math.min(startIndex, total));
-		if (startIndex >= total) {
-			startIndex = Math.max(0, total - maxSlots);
-		}
-		endIndex = Math.max(startIndex, endIndex);
-		if (endIndex - startIndex > maxSlots) {
-			endIndex = startIndex + maxSlots;
-		}
-
-		const out: HTMLElement[] = [];
-		for (let i = startIndex; i < endIndex; i++) {
-			out.push(nodes[i]);
-		}
-		return out;
-	}
-
-		function computeVisible(items: InventoryItem[]): InventoryItem[] {
-			let out = Array.isArray(items) ? items : [];
+			function computeVisible(items: InventoryItem[]): InventoryItem[] {
+				let out = Array.isArray(items) ? items : [];
 
 			if (filter === 'items') {
 				out = out.filter((item) => item.type === 'item');
@@ -442,38 +414,22 @@
 		return false;
 	}
 
-	async function applyVisibleItems(
-		nextVisible: InventoryItem[],
-		preserveAnchor: boolean,
-		animationDuration: number
-	): Promise<void> {
-		const anchor = preserveAnchor ? captureScrollAnchor() : null;
-		const wantsAnimate = Boolean(animationDuration) && !prefersReducedMotion() && Boolean(inventoryGridEl) && Boolean(inventoryScrollEl);
-		const beforeSlots = wantsAnimate ? getAnimatableSlots() : null;
-		const fromPositions = beforeSlots && beforeSlots.length > 0 ? captureFlipPositions(beforeSlots) : null;
+		async function applyVisibleItems(
+			nextVisible: InventoryItem[],
+			preserveAnchor: boolean
+		): Promise<void> {
+			const anchor = preserveAnchor ? captureScrollAnchor() : null;
+			visibleItems = nextVisible;
+			await tick();
 
-		visibleItems = nextVisible;
-		await tick();
-
-		const scrollDelta = preserveAnchor ? restoreScrollAnchor(anchor) : 0;
-		if (wantsAnimate && fromPositions) {
-			const afterSlots = getAnimatableSlots();
-			const effectiveDuration = computeFlipDuration(sort, afterSlots.length, true, { durationMs: animationDuration });
-			if (effectiveDuration > 0) {
-				playFlipAnimation({
-					elements: afterSlots,
-					getKey: (node) => node.dataset.itemId ?? null,
-					from: fromPositions,
-					durationMs: effectiveDuration,
-					scrollDeltaY: scrollDelta
-				});
+			if (preserveAnchor) {
+				restoreScrollAnchor(anchor);
 			}
 		}
-	}
 
-	async function recomputeInventory({ preserveAnchor }: { preserveAnchor: boolean }): Promise<void> {
-		await applyVisibleItems(computeVisible(inventoryItems), preserveAnchor, 0);
-	}
+		async function recomputeInventory({ preserveAnchor }: { preserveAnchor: boolean }): Promise<void> {
+			await applyVisibleItems(computeVisible(inventoryItems), preserveAnchor);
+		}
 
 		async function loadCpus(): Promise<void> {
 			if (!terminalId) {
@@ -505,11 +461,269 @@
 			terminalDropdownOpen = false;
 
 			if (terminalId !== previous) {
+				closeCpuProcessModal();
 				inventoryItems = [];
 				inventoryState = new Map();
 				visibleItems = [];
 				void loadCpus();
 				startInventoryEventStream();
+				void loadInventoryViewConfigForTerminal(terminalId);
+			}
+		}
+
+		function normalizeInventoryViewConfig(raw: InventoryViewConfig | null | undefined): InventoryViewConfig {
+			const whitelist = Array.isArray(raw?.whitelist) ? raw!.whitelist.filter((x) => typeof x === 'string' && x.trim()) : [];
+			const blacklist = Array.isArray(raw?.blacklist) ? raw!.blacklist.filter((x) => typeof x === 'string' && x.trim()) : [];
+			const categories = Array.isArray(raw?.categories)
+				? raw!.categories
+						.filter((x) => x && typeof x.name === 'string' && x.name.trim() && typeof x.tagRegex === 'string' && x.tagRegex.trim())
+						.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
+				: [];
+			const collapsed = raw?.collapsed && typeof raw.collapsed === 'object' ? { ...(raw.collapsed as Record<string, boolean>) } : {};
+			return { whitelist, blacklist, categories, collapsed };
+		}
+
+		function isUnauthorizedError(e: unknown): boolean {
+			const message = e instanceof Error ? e.message : String(e ?? '');
+			return message.toLowerCase().includes('unauthorized') || message.includes('HTTP 401');
+		}
+
+		async function loadInventoryViewConfigForTerminal(nextTerminalId: string): Promise<void> {
+			if (!nextTerminalId) {
+				inventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
+				inventoryViewConfigTerminalId = null;
+				return;
+			}
+			if (inventoryViewConfigTerminalId === nextTerminalId) {
+				return;
+			}
+
+			try {
+				const cfg = await fetchInventoryViewConfig(nextTerminalId);
+				inventoryViewConfig = normalizeInventoryViewConfig(cfg);
+				inventoryViewConfigTerminalId = nextTerminalId;
+			} catch (e) {
+				if (isUnauthorizedError(e)) {
+					showToast('Invalid token', 'error');
+					setAuthToken('');
+					return;
+				}
+				inventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
+				inventoryViewConfigTerminalId = nextTerminalId;
+			}
+		}
+
+		const saveInventoryViewConfigDebounced = debounce((targetTerminalId: string, cfg: InventoryViewConfig) => {
+			void (async () => {
+				if (!targetTerminalId) return;
+				try {
+					const saved = await saveInventoryViewConfig(targetTerminalId, cfg);
+					if (terminalId === targetTerminalId) {
+						inventoryViewConfig = normalizeInventoryViewConfig(saved);
+						inventoryViewConfigTerminalId = targetTerminalId;
+					}
+				} catch (e) {
+					if (isUnauthorizedError(e)) {
+						showToast('Invalid token', 'error');
+						setAuthToken('');
+					}
+				}
+			})();
+		}, 600);
+
+		function toggleInventorySectionCollapsed(key: string): void {
+			if (!key) return;
+			const current = inventoryViewConfig?.collapsed ?? {};
+			const next = { ...current, [key]: !(current[key] === true) };
+			inventoryViewConfig = { ...inventoryViewConfig, collapsed: next };
+			if (terminalId) {
+				saveInventoryViewConfigDebounced(terminalId, inventoryViewConfig);
+			}
+		}
+
+		function onInventorySettingsOverlayClick(e: MouseEvent): void {
+			if (e.target === inventorySettingsOverlayEl) {
+				closeInventorySettingsModal();
+			}
+		}
+
+		async function openInventorySettingsModalForTerminal(terminal: TerminalInfo): Promise<void> {
+			if (!terminal?.id) return;
+			inventorySettingsOpen = true;
+			inventorySettingsTerminalId = terminal.id;
+			inventorySettingsTerminalName = terminal.displayName;
+			inventorySettingsSaving = false;
+			inventorySettingsError = null;
+
+			try {
+				const cfg = terminal.id === inventoryViewConfigTerminalId ? inventoryViewConfig : await fetchInventoryViewConfig(terminal.id);
+				const normalized = normalizeInventoryViewConfig(cfg);
+				inventorySettingsWhitelistText = normalized.whitelist.join('\n');
+				inventorySettingsBlacklistText = normalized.blacklist.join('\n');
+				inventorySettingsCategories = normalized.categories.map((x) => createInventoryCategoryDraft(x));
+				clearInventoryCategoryDrag();
+			} catch (e) {
+				if (isUnauthorizedError(e)) {
+					showToast('Invalid token', 'error');
+					setAuthToken('');
+					return;
+				}
+				inventorySettingsWhitelistText = '';
+				inventorySettingsBlacklistText = '';
+				inventorySettingsCategories = [];
+				inventorySettingsError = e instanceof Error ? e.message : 'Failed to load settings';
+			}
+		}
+
+		function closeInventorySettingsModal(): void {
+			inventorySettingsOpen = false;
+			inventorySettingsTerminalId = null;
+			inventorySettingsTerminalName = null;
+			inventorySettingsSaving = false;
+			inventorySettingsError = null;
+			clearInventoryCategoryDrag();
+		}
+
+		function createInventoryCategoryDraft(rule?: { name?: string; tagRegex?: string }): InventoryCategoryDraft {
+			inventorySettingsCategoryIdSeq += 1;
+			return {
+				id: `cat_${inventorySettingsCategoryIdSeq}`,
+				name: typeof rule?.name === 'string' ? rule.name : '',
+				tagRegex: typeof rule?.tagRegex === 'string' ? rule.tagRegex : ''
+			};
+		}
+
+		function clearInventoryCategoryDrag(): void {
+			inventorySettingsCategoryDragId = null;
+			inventorySettingsCategoryDragOverId = null;
+		}
+
+		function onInventoryCategoryDragStart(e: DragEvent, id: string): void {
+			if (!id || inventorySettingsSaving) return;
+			inventorySettingsCategoryDragId = id;
+			inventorySettingsCategoryDragOverId = id;
+
+			try {
+				e.dataTransfer?.setData('text/plain', id);
+			} catch {
+				// ignore
+			}
+
+			if (e.dataTransfer) {
+				e.dataTransfer.effectAllowed = 'move';
+			}
+		}
+
+		function onInventoryCategoryDragOver(e: DragEvent, overId: string): void {
+			if (!inventorySettingsCategoryDragId || inventorySettingsSaving) return;
+			e.preventDefault();
+
+			if (inventorySettingsCategoryDragOverId !== overId) {
+				inventorySettingsCategoryDragOverId = overId;
+			}
+
+			if (e.dataTransfer) {
+				e.dataTransfer.dropEffect = 'move';
+			}
+		}
+
+		function onInventoryCategoryDrop(e: DragEvent, dropId: string): void {
+			const fromId = inventorySettingsCategoryDragId;
+			if (!fromId || inventorySettingsSaving) return;
+			e.preventDefault();
+
+			const fromIndex = inventorySettingsCategories.findIndex((x) => x.id === fromId);
+			const toIndex = inventorySettingsCategories.findIndex((x) => x.id === dropId);
+			if (fromIndex === -1 || toIndex === -1) {
+				clearInventoryCategoryDrag();
+				return;
+			}
+
+			inventorySettingsCategories = arrayMove(inventorySettingsCategories, fromIndex, toIndex);
+			clearInventoryCategoryDrag();
+		}
+
+		function onInventoryCategoryDragEnd(): void {
+			clearInventoryCategoryDrag();
+		}
+
+		function addInventoryCategoryRule(): void {
+			inventorySettingsCategories = [...inventorySettingsCategories, createInventoryCategoryDraft()];
+		}
+
+		function removeInventoryCategoryRule(id: string): void {
+			if (!id) return;
+			inventorySettingsCategories = inventorySettingsCategories.filter((x) => x.id !== id);
+		}
+
+		function parseRegexLines(text: string): string[] {
+			return String(text)
+				.split('\n')
+				.map((x) => x.trim())
+				.filter(Boolean);
+		}
+
+		function validateRegex(pattern: string): string | null {
+			try {
+				// eslint-disable-next-line no-new
+				new RegExp(pattern, 'i');
+				return null;
+			} catch {
+				return `Invalid regex: ${pattern}`;
+			}
+		}
+
+		async function saveInventorySettings(): Promise<void> {
+			if (!inventorySettingsTerminalId) return;
+			inventorySettingsSaving = true;
+			inventorySettingsError = null;
+
+			const whitelist = parseRegexLines(inventorySettingsWhitelistText);
+			const blacklist = parseRegexLines(inventorySettingsBlacklistText);
+			for (const p of [...whitelist, ...blacklist]) {
+				const err = validateRegex(p);
+				if (err) {
+					inventorySettingsError = err;
+					inventorySettingsSaving = false;
+					return;
+				}
+			}
+
+			const categories = inventorySettingsCategories
+				.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
+				.filter((x) => x.name && x.tagRegex);
+			for (const c of categories) {
+				const err = validateRegex(c.tagRegex);
+				if (err) {
+					inventorySettingsError = err;
+					inventorySettingsSaving = false;
+					return;
+				}
+			}
+
+			const nextCfg: InventoryViewConfig = {
+				whitelist,
+				blacklist,
+				categories,
+				collapsed: inventoryViewConfigTerminalId === inventorySettingsTerminalId ? inventoryViewConfig.collapsed : {}
+			};
+
+			try {
+				const saved = await saveInventoryViewConfig(inventorySettingsTerminalId, nextCfg);
+				if (terminalId === inventorySettingsTerminalId) {
+					inventoryViewConfig = normalizeInventoryViewConfig(saved);
+					inventoryViewConfigTerminalId = inventorySettingsTerminalId;
+				}
+				closeInventorySettingsModal();
+			} catch (e) {
+				if (isUnauthorizedError(e)) {
+					showToast('Invalid token', 'error');
+					setAuthToken('');
+					return;
+				}
+				inventorySettingsError = e instanceof Error ? e.message : 'Failed to save settings';
+			} finally {
+				inventorySettingsSaving = false;
 			}
 		}
 
@@ -519,17 +733,28 @@
 			void recomputeInventory({ preserveAnchor: false });
 		}
 
-	async function setSort(next: SortMode): Promise<void> {
-		if (sort === next) return;
-		sort = next;
-		const nextVisible = computeVisible(inventoryItems);
-		await applyVisibleItems(nextVisible, next === 'amount', 0);
-	}
+		async function setSort(next: SortMode): Promise<void> {
+			if (sort === next) return;
+			sort = next;
+			const nextVisible = computeVisible(inventoryItems);
+			await applyVisibleItems(nextVisible, next === 'amount');
+		}
 
 	function executeSearchNow(): void {
 		applySearchDebounced.cancel();
 		searchTerm = searchValue.trim();
 		void recomputeInventory({ preserveAnchor: false });
+	}
+
+	function submitLoginToken(): void {
+		const token = loginTokenValue.trim();
+		if (!token) {
+			loginError = 'Token required';
+			return;
+		}
+		loginError = null;
+		setAuthToken(token);
+		loginTokenValue = '';
 	}
 
 	function openCraftModal(item: InventoryItem): void {
@@ -542,6 +767,109 @@
 	function closeCraftModal(): void {
 		craftOpen = false;
 		craftItem = null;
+	}
+
+	function openCpuProcessModal(cpu: CpuDto): void {
+		if (!cpu?.busy) return;
+		if (!cpu.cpuId) return;
+		if (!terminalId) return;
+
+		cpuProcessOpen = true;
+		cpuProcessCpuId = cpu.cpuId;
+		cpuProcessCpuName = cpu.name;
+		cpuProcessView = 'list';
+		cpuProcessAutoRefresh = true;
+		cpuProcessCompletionNotified = false;
+		cpuProcessLoading = false;
+		cpuProcessError = null;
+		cpuProcessData = null;
+		cpuProcessFilter = '';
+
+		syncCpuProcessTimer();
+	}
+
+	function closeCpuProcessModal(): void {
+		cpuProcessOpen = false;
+		cpuProcessCpuId = null;
+		cpuProcessCpuName = null;
+		cpuProcessError = null;
+		cpuProcessData = null;
+		stopCpuProcessTimer();
+	}
+
+	function stopCpuProcessTimer(): void {
+		if (cpuProcessTimer != null) {
+			window.clearInterval(cpuProcessTimer);
+			cpuProcessTimer = null;
+		}
+	}
+
+	function syncCpuProcessTimer(): void {
+		stopCpuProcessTimer();
+
+		if (!cpuProcessOpen) return;
+		void loadCpuProcess();
+
+		if (!cpuProcessAutoRefresh) return;
+		cpuProcessTimer = window.setInterval(() => void loadCpuProcess(), 400);
+	}
+
+	async function loadCpuProcess(): Promise<void> {
+		if (!cpuProcessOpen) return;
+		if (!terminalId) return;
+		if (!cpuProcessCpuId) return;
+		if (cpuProcessLoading) return;
+
+		cpuProcessLoading = true;
+		try {
+			const data = await fetchCpuProcess(terminalId, cpuProcessCpuId);
+			cpuProcessData = data;
+			cpuProcessCpuName = data?.name ?? cpuProcessCpuName;
+			cpuProcessError = null;
+
+			if (data && data.busy === false) {
+				cpuProcessAutoRefresh = false;
+				stopCpuProcessTimer();
+				if (!cpuProcessCompletionNotified) {
+					const outputName = data?.summary?.finalOutput?.name;
+					showToast(outputName ? `Crafting complete: ${outputName}` : 'Crafting complete', 'success');
+					cpuProcessCompletionNotified = true;
+				}
+			}
+		} catch (e) {
+			const message = e instanceof Error ? e.message : 'Failed to load CPU process';
+			if (message.toLowerCase().includes('not busy')) {
+				cpuProcessAutoRefresh = false;
+				stopCpuProcessTimer();
+				cpuProcessError = null;
+
+				const lastSummary: CpuProcessResponse['summary'] = cpuProcessData?.summary ?? {};
+				const outputTotal = Number(lastSummary.outputTotal ?? 0);
+				const nextSummary =
+					outputTotal > 0
+						? { ...lastSummary, outputDone: outputTotal, outputRemaining: 0 }
+						: lastSummary;
+
+				cpuProcessData = {
+					cpuId: cpuProcessCpuId,
+					busy: false,
+					name: cpuProcessCpuName ?? null,
+					summary: nextSummary,
+					entries: [],
+					patterns: []
+				};
+
+				if (!cpuProcessCompletionNotified) {
+					const outputName = cpuProcessData?.summary?.finalOutput?.name;
+					showToast(outputName ? `Crafting complete: ${outputName}` : 'Crafting complete', 'success');
+					cpuProcessCompletionNotified = true;
+				}
+				return;
+			}
+			cpuProcessError = message;
+		} finally {
+			cpuProcessLoading = false;
+		}
 	}
 
 	async function confirmCraft(): Promise<void> {
@@ -559,29 +887,13 @@
 			}
 
 			await submitCraft(body);
-			showToast(`Request sent: ${craftAmount}x ${displayNameFor(craftItem)}`, 'success');
+			const amountText = craftItem.type === 'fluid' ? `${craftAmount}B` : `${craftAmount}x`;
+			showToast(`Request sent: ${amountText} ${displayNameFor(craftItem)}`, 'success');
 			closeCraftModal();
 			void loadCpus();
 		} catch (e) {
 			showToast(e instanceof Error ? e.message : 'Craft request failed', 'error');
 		}
-	}
-
-	function showCpuDetail(index: number): void {
-		const cpu = cpus[index];
-		if (!cpu) return;
-
-		const name = cpu.name || `CPU ${index + 1}`;
-		let msg = name;
-
-		if (cpu.busy && cpu.jobStatus) {
-			const elapsed = Math.round(cpu.jobStatus.elapsedTimeNanos / 1e9);
-			const mins = Math.floor(elapsed / 60);
-			const secs = elapsed % 60;
-			msg += ` - ${mins}m ${secs}s elapsed`;
-		}
-
-		showToast(msg, cpu.busy ? 'success' : '');
 	}
 
 	function ensureTooltipPositioner(): TooltipPositioner | null {
@@ -697,21 +1009,41 @@
 		}
 	}
 
+	function onCpuProcessOverlayClick(e: MouseEvent): void {
+		if (e.target === cpuProcessOverlayEl) {
+			closeCpuProcessModal();
+		}
+	}
+
+	function formatElapsedNanos(elapsedTimeNanos: number | undefined): string {
+		const nanos = Number(elapsedTimeNanos);
+		if (!Number.isFinite(nanos) || nanos <= 0) return '0:00';
+
+		const totalSeconds = Math.floor(nanos / 1_000_000_000);
+		const hours = Math.floor(totalSeconds / 3600);
+		const minutes = Math.floor((totalSeconds % 3600) / 60);
+		const seconds = totalSeconds % 60;
+
+		const mm = hours > 0 ? String(minutes).padStart(2, '0') : String(minutes);
+		const ss = String(seconds).padStart(2, '0');
+		return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+	}
+
 	function onSearchKeyUp(e: KeyboardEvent): void {
 		if (e.key === 'Enter') {
 			executeSearchNow();
 		}
 	}
 
-		onMount(() => {
-			void loadTerminalsPoll();
-			void checkConnection();
-			void loadCpus();
+	function startApp(): () => void {
+		void loadTerminalsPoll();
+		void checkConnection();
+		void loadCpus();
 
-			const statusTimer = window.setInterval(() => void checkConnection(), 5000);
-			const terminalsTimer = window.setInterval(() => void loadTerminalsPoll(), 10000);
-			const cpuTimer = window.setInterval(() => void loadCpus(), 2000);
-			inventoryScrollEl?.addEventListener('scroll', onInventoryScroll, { passive: true });
+		const statusTimer = window.setInterval(() => void checkConnection(), 5000);
+		const terminalsTimer = window.setInterval(() => void loadTerminalsPoll(), 10000);
+		const cpuTimer = window.setInterval(() => void loadCpus(), 2000);
+		inventoryScrollEl?.addEventListener('scroll', onInventoryScroll, { passive: true });
 
 		const onDocClick = (e: MouseEvent) => {
 			if (!terminalDropdownOpen) return;
@@ -724,6 +1056,8 @@
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				closeCraftModal();
+				closeCpuProcessModal();
+				closeInventorySettingsModal();
 				terminalDropdownOpen = false;
 			}
 		};
@@ -731,19 +1065,47 @@
 		document.addEventListener('click', onDocClick);
 		document.addEventListener('keydown', onKeyDown);
 
-			return () => {
-				clearInterval(statusTimer);
-				clearInterval(terminalsTimer);
-				clearInterval(cpuTimer);
-				inventoryScrollEl?.removeEventListener('scroll', onInventoryScroll);
-				document.removeEventListener('click', onDocClick);
-				document.removeEventListener('keydown', onKeyDown);
-				stopInventoryEventStream();
-				applySearchDebounced.cancel();
-			};
+		return () => {
+			clearInterval(statusTimer);
+			clearInterval(terminalsTimer);
+			clearInterval(cpuTimer);
+			stopCpuProcessTimer();
+			inventoryScrollEl?.removeEventListener('scroll', onInventoryScroll);
+			document.removeEventListener('click', onDocClick);
+			document.removeEventListener('keydown', onKeyDown);
+			stopInventoryEventStream();
+			applySearchDebounced.cancel();
+			saveInventoryViewConfigDebounced.cancel();
+		};
+	}
+
+	onMount(() => {
+		const unsubscribe = authToken.subscribe((token) => {
+			const hasToken = Boolean(String(token ?? '').trim());
+			if (!hasToken) {
+				if (appCleanup) {
+					appCleanup();
+					appCleanup = null;
+				}
+				return;
+			}
+
+			if (!appCleanup) {
+				appCleanup = startApp();
+			}
 		});
 
+		return () => {
+			unsubscribe();
+			if (appCleanup) {
+				appCleanup();
+				appCleanup = null;
+			}
+		};
+	});
+
 	onDestroy(() => stopInventoryEventStream());
+	onDestroy(() => stopCpuProcessTimer());
 
 	$: totalItemAmount = visibleItems.reduce((sum, item) => {
 		const amount = Number(item?.amount);
@@ -754,6 +1116,26 @@
 	$: connectedTerminals = getConnectedTerminals(terminals);
 	$: cpuCount = cpus.length;
 	$: statusText = online ? 'ONLINE' : 'OFFLINE';
+	$: inventoryRenderNodes = buildInventoryRenderNodes(
+		visibleItems,
+		filter,
+		inventoryViewConfigTerminalId === terminalId ? inventoryViewConfig : null
+	);
+
+	$: cpuProcessEntries = Array.isArray(cpuProcessData?.entries) ? cpuProcessData.entries : [];
+	$: cpuProcessFilterTerm = cpuProcessFilter.trim().toLowerCase();
+	$: cpuProcessEntriesFiltered = cpuProcessFilterTerm
+		? cpuProcessEntries.filter((e) => {
+				const stack = e?.stack;
+				const name = String(stack?.name ?? '').toLowerCase();
+				const id = String(stack?.id ?? '').toLowerCase();
+				return name.includes(cpuProcessFilterTerm) || id.includes(cpuProcessFilterTerm);
+			})
+		: cpuProcessEntries;
+
+	$: cpuProcessEntriesActive = cpuProcessEntriesFiltered.filter((e) => Number(e?.active ?? 0) > 0);
+	$: cpuProcessEntriesWaiting = cpuProcessEntriesFiltered.filter((e) => Number(e?.waiting ?? 0) > 0);
+	$: cpuProcessEntriesStored = cpuProcessEntriesFiltered.filter((e) => Number(e?.stored ?? 0) > 0);
 </script>
 
 <div class="terminal-container">
@@ -774,56 +1156,80 @@
 				</div>
 				<div class="network-select-wrapper">
 					<span class="network-label">NETWORK LINK</span>
-					<div
-						class="ae2-select-container"
-						class:open={terminalDropdownOpen}
-						id="terminal-select-container"
-						bind:this={terminalSelectEl}
-					>
+					<div class="network-select-row">
 						<div
-							class="ae2-select-trigger"
-							id="terminal-select-trigger"
-							role="button"
-							tabindex="0"
-							aria-expanded={terminalDropdownOpen}
-							on:click|stopPropagation={openTerminalDropdown}
-							on:keydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') {
-									e.preventDefault();
-									openTerminalDropdown();
-								}
-							}}
+							class="ae2-select-container"
+							class:open={terminalDropdownOpen}
+							id="terminal-select-container"
+							bind:this={terminalSelectEl}
 						>
-							<span id="terminal-selected-text">{terminalDisplayName}</span>
-							<svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<polyline points="6 9 12 15 18 9" />
+							<div
+								class="ae2-select-trigger"
+								id="terminal-select-trigger"
+								role="button"
+								tabindex="0"
+								aria-expanded={terminalDropdownOpen}
+								on:click|stopPropagation={openTerminalDropdown}
+								on:keydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										openTerminalDropdown();
+									}
+								}}
+							>
+								<span id="terminal-selected-text">{terminalDisplayName}</span>
+								<svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<polyline points="6 9 12 15 18 9" />
+								</svg>
+							</div>
+							<div class="ae2-select-dropdown" class:hidden={!terminalDropdownOpen} id="terminal-dropdown-list">
+								{#if connectedTerminals.length === 0}
+									<div class="ae2-select-option">No terminals found</div>
+								{:else}
+									{#each connectedTerminals as t (t.id)}
+										<div
+											class={`ae2-select-option ${t.id === terminalId ? 'selected' : ''}`}
+											data-value={t.id}
+											data-name={t.displayName}
+											role="option"
+											tabindex="0"
+											aria-selected={t.id === terminalId}
+											on:click={() => selectTerminal(t)}
+											on:keydown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													e.preventDefault();
+													selectTerminal(t);
+												}
+											}}
+										>
+											{t.displayName}
+										</div>
+									{/each}
+								{/if}
+							</div>
+						</div>
+
+						<button
+							class="network-settings-btn"
+							type="button"
+							aria-label="Inventory Settings"
+							title="Inventory Settings"
+							disabled={!terminalId}
+							on:click={() =>
+								terminalId &&
+								void openInventorySettingsModalForTerminal({
+									id: terminalId,
+									displayName: terminalDisplayName,
+									connected: true
+								})}
+						>
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path
+									d="M19.14 12.94a7.43 7.43 0 0 0 .05-.94 7.43 7.43 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.28 7.28 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 1h-3.8a.5.5 0 0 0-.49.42l-.36 2.54a7.28 7.28 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 7.98a.5.5 0 0 0 .12.64l2.03 1.58a7.43 7.43 0 0 0-.05.94c0 .32.02.63.05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.72 1.63.94l.36 2.54a.5.5 0 0 0 .49.42h3.8a.5.5 0 0 0 .49-.42l.36-2.54c.58-.22 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58z"
+								/>
+								<circle cx="12" cy="12" r="3" />
 							</svg>
-						</div>
-						<div class="ae2-select-dropdown" class:hidden={!terminalDropdownOpen} id="terminal-dropdown-list">
-							{#if connectedTerminals.length === 0}
-								<div class="ae2-select-option">No terminals found</div>
-							{:else}
-								{#each connectedTerminals as t (t.id)}
-									<div
-										class={`ae2-select-option ${t.id === terminalId ? 'selected' : ''}`}
-										data-value={t.id}
-										data-name={t.displayName}
-										role="option"
-										tabindex="0"
-										aria-selected={t.id === terminalId}
-										on:click={() => selectTerminal(t)}
-										on:keydown={(e) => {
-											if (e.key === 'Enter' || e.key === ' ') {
-												e.preventDefault();
-												selectTerminal(t);
-											}
-										}}
-									>
-										{t.displayName}
-									</div>
-								{/each}
-							{/if}
-						</div>
+						</button>
 					</div>
 				</div>
 				<div class="connection-bar"></div>
@@ -913,33 +1319,53 @@
 					on:mousemove={onGridMouseMove}
 					on:mouseout={onGridMouseOut}
 				>
-					{#if visibleItems.length === 0}
+					{#if inventoryRenderNodes.length === 0}
 						<div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;height:200px;color:#64748b;font-size:0.9rem;">
 							No items found
 						</div>
 					{:else}
-						{#each visibleItems as item (item.uniqueId)}
-							<div
-								class={`item-slot ${item.type === 'fluid' ? 'fluid' : ''} ${item.craftable ? 'craftable' : ''}`}
-								data-item-id={item.uniqueId}
-								data-icon-id={item.iconKey}
-								data-item-type={item.type}
-								role="button"
-								tabindex="-1"
-								on:click={() => item.craftable && openCraftModal(item)}
-								on:keydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') {
-										e.preventDefault();
-										if (item.craftable) {
-											openCraftModal(item);
+						{#each inventoryRenderNodes as node (node.kind === 'header' ? `h:${node.key}` : node.key)}
+							{#if node.kind === 'header'}
+								<div class="inventory-group-header" data-section-key={node.key} role="row">
+									<button
+										class="inventory-group-toggle"
+										type="button"
+										aria-label={node.collapsed ? `Expand ${node.title}` : `Collapse ${node.title}`}
+										on:click={() => toggleInventorySectionCollapsed(node.key)}
+									>
+										{node.collapsed ? '+' : '−'}
+									</button>
+									<div class="inventory-group-title">{node.title}</div>
+									<div class="inventory-group-count">{node.count}</div>
+								</div>
+							{:else}
+								{@const item = node.item}
+								<div
+									class={`item-slot ${item.type === 'fluid' ? 'fluid' : ''} ${item.craftable ? 'craftable' : ''}`}
+									data-item-id={item.uniqueId}
+									data-icon-id={item.iconKey}
+									data-item-type={item.type}
+									role="button"
+									tabindex="-1"
+									on:click={() => item.craftable && openCraftModal(item)}
+									on:keydown={(e) => {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											if (item.craftable) {
+												openCraftModal(item);
+											}
 										}
-									}
-								}}
-							>
-								<IconImage iconKey={item.iconKey} alt={displayNameFor(item)} className="item-icon" />
-								<span class="item-name">{displayNameFor(item)}</span>
-								<span class="item-amount">{formatAmount(Number(item.amount))}</span>
-							</div>
+									}}
+								>
+									<IconImage iconKey={item.iconKey} alt={displayNameFor(item)} className="item-icon" />
+									<span class="item-name">{displayNameFor(item)}</span>
+									<span class="item-amount">
+										{item.type === 'fluid'
+											? formatFluidAmount(Number(item.amount))
+											: formatAmount(Number(item.amount))}
+									</span>
+								</div>
+							{/if}
 						{/each}
 					{/if}
 				</div>
@@ -1031,19 +1457,14 @@
 							<span>No CPUs detected</span>
 						</div>
 					{:else}
-						{#each cpus as cpu, i (cpu.name ?? `cpu-${i}`)}
-							<div
-								class={`cpu-card ${cpu.busy ? 'busy' : 'idle'}`}
-								role="button"
-								tabindex="0"
+						{#each cpus as cpu, i (cpu.cpuId || (cpu.name ?? `cpu-${i}`))}
+							{@const canOpenProcess = cpu.busy && Boolean(cpu.jobStatus) && Boolean(cpu.cpuId)}
+							<button
+								class={`cpu-card ${cpu.busy ? 'busy' : 'idle'} ${canOpenProcess ? 'clickable' : ''}`}
 								data-cpu-index={i}
-								on:click={() => showCpuDetail(i)}
-								on:keydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') {
-										e.preventDefault();
-										showCpuDetail(i);
-									}
-								}}
+								type="button"
+								disabled={!canOpenProcess}
+								on:click={() => openCpuProcessModal(cpu)}
 							>
 								<div class="cpu-header">
 									<div class="cpu-identity">
@@ -1102,13 +1523,380 @@
 										<span class="cpu-stat-value">{cpu.coProcessors}</span>
 									</div>
 								</div>
-							</div>
+							</button>
 						{/each}
 					{/if}
 				</div>
 			</div>
 		</aside>
 	</main>
+</div>
+
+<div
+	id="cpu-process-modal"
+	class="modal-overlay"
+	class:active={cpuProcessOpen}
+	role="presentation"
+	bind:this={cpuProcessOverlayEl}
+	on:click={onCpuProcessOverlayClick}
+>
+	<div class="modal-content cpu-process-modal">
+		<div class="modal-header cpu-process-header">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+				<rect x="4" y="4" width="16" height="16" rx="2" />
+				<rect x="9" y="9" width="6" height="6" />
+				<path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" />
+			</svg>
+			<div class="cpu-process-title">
+				<h3>Crafting Process</h3>
+				<div class="cpu-process-subtitle">{cpuProcessCpuName || 'Crafting CPU'}</div>
+			</div>
+			<div class="cpu-process-actions">
+				<button
+					class="cpu-process-action"
+					type="button"
+					disabled={!cpuProcessOpen || cpuProcessLoading}
+					on:click={() => void loadCpuProcess()}
+				>
+					Refresh
+				</button>
+				<label class="cpu-process-autorefresh">
+					<input type="checkbox" bind:checked={cpuProcessAutoRefresh} on:change={syncCpuProcessTimer} />
+					<span>Auto</span>
+				</label>
+			</div>
+		</div>
+
+		<div class="cpu-process-tabbar">
+			<button
+				class={`cpu-process-tab ${cpuProcessView === 'list' ? 'active' : ''}`}
+				type="button"
+				on:click={() => (cpuProcessView = 'list')}
+			>
+				List
+			</button>
+			<button
+				class={`cpu-process-tab ${cpuProcessView === 'statusTree' ? 'active' : ''}`}
+				type="button"
+				on:click={() => (cpuProcessView = 'statusTree')}
+			>
+				Status Tree
+			</button>
+			<button
+				class={`cpu-process-tab ${cpuProcessView === 'dependencyTree' ? 'active' : ''}`}
+				type="button"
+				on:click={() => (cpuProcessView = 'dependencyTree')}
+			>
+				Dependency Tree (Experimental)
+			</button>
+		</div>
+
+		<div class="cpu-process-body">
+			{#if cpuProcessError}
+				<div class="cpu-process-error">{cpuProcessError}</div>
+			{/if}
+
+			{#if cpuProcessLoading && !cpuProcessData}
+				<div class="cpu-process-loading">Loading…</div>
+			{:else if cpuProcessData}
+				{@const summary = cpuProcessData.summary}
+				{@const output = summary.finalOutput}
+				{@const outputTotal = Number(summary.outputTotal ?? 0)}
+				{@const outputDone = Number(summary.outputDone ?? 0)}
+				{@const totalItems = Number(summary.totalItems ?? 0)}
+				{@const progress = Number(summary.progress ?? 0)}
+				{@const hasOutput = outputTotal > 0}
+				{@const progressPct = hasOutput
+					? Math.round((outputDone / outputTotal) * 100)
+					: totalItems > 0
+						? Math.round((progress / totalItems) * 100)
+						: 0}
+
+				{#if cpuProcessData.busy === false}
+					<div class="cpu-process-warning">CPU is no longer busy.</div>
+				{/if}
+
+				<div class="cpu-process-summary">
+					<div class="cpu-process-output">
+						<div class="cpu-process-output-icon">
+							{#if output?.iconKey}
+								<IconImage
+									iconKey={output.iconKey}
+									alt={output.name}
+									className="cpu-process-output-icon-img"
+									lazy={false}
+									hideOnError={true}
+								/>
+							{:else}
+								<img class="cpu-process-output-icon-img" src={PLACEHOLDER_ICON} alt="" />
+							{/if}
+						</div>
+						<div class="cpu-process-output-text">
+							<div class="cpu-process-output-name">{output?.name ?? 'Unknown'}</div>
+							<div class="cpu-process-output-meta">
+								<span class="cpu-process-output-id">{output?.id ?? ''}</span>
+								<span class="cpu-process-output-elapsed">Elapsed {formatElapsedNanos(summary.elapsedTimeNanos)}</span>
+							</div>
+						</div>
+					</div>
+
+					<div class="cpu-process-progress">
+						<div class="cpu-progress">
+							<div class="cpu-progress-bar" style={`width: ${progressPct}%`}></div>
+						</div>
+						<div class="cpu-process-progress-text">
+							{#if hasOutput}
+								<span>{formatAmount(outputDone)}/{formatAmount(outputTotal)}</span>
+							{:else}
+								<span>{formatAmount(progress)}/{formatAmount(totalItems)}</span>
+							{/if}
+							<span class="cpu-process-progress-pct">{progressPct}%</span>
+						</div>
+					</div>
+				</div>
+
+				<div class="cpu-process-view">
+					{#if cpuProcessView === 'list'}
+						<div class="cpu-process-list-controls">
+							<input
+								class="cpu-process-filter"
+								type="text"
+								placeholder="Filter items…"
+								bind:value={cpuProcessFilter}
+							/>
+							<div class="cpu-process-count">{cpuProcessEntriesFiltered.length} entries</div>
+						</div>
+						<div class="cpu-process-table-wrap">
+							<table class="cpu-process-table">
+								<thead>
+									<tr>
+										<th>Item</th>
+										<th class="num">Stored</th>
+										<th class="num">Waiting</th>
+										<th class="num">Active</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each cpuProcessEntriesFiltered as row (row.stack.iconKey)}
+										{@const stack = row.stack}
+										<tr>
+											<td class="item">
+												<div class="cpu-process-item">
+													{#if stack.iconKey}
+														<IconImage
+															iconKey={stack.iconKey}
+															alt={stack.name}
+															className="cpu-process-item-icon"
+															lazy={true}
+															hideOnError={true}
+														/>
+													{:else}
+														<img class="cpu-process-item-icon" src={PLACEHOLDER_ICON} alt="" />
+													{/if}
+													<div class="cpu-process-item-text">
+														<div class="cpu-process-item-name">{stack.name}</div>
+														<div class="cpu-process-item-id">{stack.id}</div>
+													</div>
+												</div>
+											</td>
+											<td class="num">{formatAmount(Number(row.stored ?? 0))}</td>
+											<td class="num">{formatAmount(Number(row.waiting ?? 0))}</td>
+											<td class="num">{formatAmount(Number(row.active ?? 0))}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{:else if cpuProcessView === 'statusTree'}
+						<div class="cpu-process-tree">
+							<details open>
+								<summary>Active ({cpuProcessEntriesActive.length})</summary>
+								<div class="cpu-process-tree-list">
+									{#each cpuProcessEntriesActive as row (row.stack.iconKey)}
+										<CpuProcessTreeRow stack={row.stack} value={row.active} label="Active" />
+									{/each}
+								</div>
+							</details>
+							<details open>
+								<summary>Waiting ({cpuProcessEntriesWaiting.length})</summary>
+								<div class="cpu-process-tree-list">
+									{#each cpuProcessEntriesWaiting as row (row.stack.iconKey)}
+										<CpuProcessTreeRow stack={row.stack} value={row.waiting} label="Waiting" />
+									{/each}
+								</div>
+							</details>
+							<details>
+								<summary>Stored ({cpuProcessEntriesStored.length})</summary>
+								<div class="cpu-process-tree-list">
+									{#each cpuProcessEntriesStored as row (row.stack.iconKey)}
+										<CpuProcessTreeRow stack={row.stack} value={row.stored} label="Stored" />
+									{/each}
+								</div>
+							</details>
+						</div>
+					{:else if cpuProcessView === 'dependencyTree'}
+						{#if cpuProcessData.patterns.length === 0}
+							<div class="cpu-process-empty">No pattern/task data available for this job.</div>
+						{:else}
+							<CpuDependencyTree
+								root={cpuProcessData.summary.finalOutput}
+								patterns={cpuProcessData.patterns}
+								entries={cpuProcessData.entries}
+							/>
+						{/if}
+					{/if}
+				</div>
+			{:else}
+				<div class="cpu-process-empty">Select a busy CPU to view its process.</div>
+			{/if}
+		</div>
+	</div>
+</div>
+
+<div
+	id="inventory-settings-modal"
+	class="modal-overlay"
+	class:active={inventorySettingsOpen}
+	role="presentation"
+	bind:this={inventorySettingsOverlayEl}
+	on:click={onInventorySettingsOverlayClick}
+>
+	<div class="modal-content inventory-settings-modal" role="dialog" aria-modal="true" tabindex="-1">
+		<div class="modal-header">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path
+					d="M19.14 12.94a7.43 7.43 0 0 0 .05-.94 7.43 7.43 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.28 7.28 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 1h-3.8a.5.5 0 0 0-.49.42l-.36 2.54a7.28 7.28 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 7.98a.5.5 0 0 0 .12.64l2.03 1.58a7.43 7.43 0 0 0-.05.94c0 .32.02.63.05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.05.72 1.63.94l.36 2.54a.5.5 0 0 0 .49.42h3.8a.5.5 0 0 0 .49-.42l.36-2.54c.58-.22 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58z"
+				/>
+				<circle cx="12" cy="12" r="3" />
+			</svg>
+			<h3>Inventory Settings</h3>
+		</div>
+		<div class="modal-body inventory-settings-body">
+			<div class="inventory-settings-subtitle">
+				{inventorySettingsTerminalName || inventorySettingsTerminalId || 'Terminal'}
+			</div>
+
+			<div class="inventory-settings-section">
+				<div class="inventory-settings-section-title">Tag Filter</div>
+				<div class="inventory-settings-hint">
+					One regex per line. Filters by item tags (e.g. <span class="mono">forge:ores/iron</span>). In <b>All</b> view,
+					enabling this hides fluids (fluids have no tags).
+				</div>
+
+				<div class="inventory-settings-grid">
+					<div class="inventory-settings-field">
+						<label for="inventory-settings-whitelist">Whitelist (must match)</label>
+						<textarea
+							id="inventory-settings-whitelist"
+							class="inventory-settings-textarea"
+							rows="5"
+							placeholder="^forge:ores/.*"
+							bind:value={inventorySettingsWhitelistText}
+							disabled={inventorySettingsSaving}
+						></textarea>
+					</div>
+					<div class="inventory-settings-field">
+						<label for="inventory-settings-blacklist">Blacklist (exclude)</label>
+						<textarea
+							id="inventory-settings-blacklist"
+							class="inventory-settings-textarea"
+							rows="5"
+							placeholder="uranium|plutonium"
+							bind:value={inventorySettingsBlacklistText}
+							disabled={inventorySettingsSaving}
+						></textarea>
+					</div>
+				</div>
+			</div>
+
+			<div class="inventory-settings-section">
+				<div class="inventory-settings-section-title">Categories</div>
+				<div class="inventory-settings-hint">
+					Scheme 1: first match wins (top to bottom). Each category is <b>name</b> + <b>tag regex</b>.
+				</div>
+
+				{#if inventorySettingsCategories.length === 0}
+					<div class="inventory-settings-empty">No categories configured.</div>
+				{/if}
+
+				<div class="inventory-settings-categories" role="list">
+					{#each inventorySettingsCategories as rule (rule.id)}
+						<div
+							class="inventory-settings-category-row"
+							class:drag-over={inventorySettingsCategoryDragOverId === rule.id}
+							class:dragging={inventorySettingsCategoryDragId === rule.id}
+							role="listitem"
+							on:dragover={(e) => onInventoryCategoryDragOver(e, rule.id)}
+							on:drop={(e) => onInventoryCategoryDrop(e, rule.id)}
+						>
+							<button
+								class="inventory-settings-category-handle"
+								type="button"
+								aria-label="Drag to reorder"
+								title="Drag to reorder"
+								disabled={inventorySettingsSaving}
+								draggable={!inventorySettingsSaving}
+								on:dragstart={(e) => onInventoryCategoryDragStart(e, rule.id)}
+								on:dragend={onInventoryCategoryDragEnd}
+							>
+								<svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+									<circle cx="3" cy="3" r="1" />
+									<circle cx="9" cy="3" r="1" />
+									<circle cx="3" cy="6" r="1" />
+									<circle cx="9" cy="6" r="1" />
+									<circle cx="3" cy="9" r="1" />
+									<circle cx="9" cy="9" r="1" />
+								</svg>
+							</button>
+							<input
+								class="inventory-settings-input inventory-settings-category-name"
+								type="text"
+								placeholder="Category name"
+								bind:value={rule.name}
+								disabled={inventorySettingsSaving}
+							/>
+							<input
+								class="inventory-settings-input mono inventory-settings-category-regex"
+								type="text"
+								placeholder="Tag regex"
+								bind:value={rule.tagRegex}
+								disabled={inventorySettingsSaving}
+							/>
+							<button
+								class="inventory-settings-remove inventory-settings-category-remove"
+								type="button"
+								disabled={inventorySettingsSaving}
+								on:click={() => removeInventoryCategoryRule(rule.id)}
+							>
+								Remove
+							</button>
+						</div>
+					{/each}
+				</div>
+
+				<div class="inventory-settings-actions">
+					<button class="inventory-settings-add" type="button" disabled={inventorySettingsSaving} on:click={addInventoryCategoryRule}>
+						Add Category
+					</button>
+				</div>
+			</div>
+
+			{#if inventorySettingsError}
+				<div class="inventory-settings-error">{inventorySettingsError}</div>
+			{/if}
+		</div>
+		<div class="modal-footer">
+			<button class="btn-cancel" type="button" disabled={inventorySettingsSaving} on:click={closeInventorySettingsModal}>
+				Cancel
+			</button>
+			<button class="btn-confirm" type="button" disabled={inventorySettingsSaving} on:click={() => void saveInventorySettings()}>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<polyline points="20 6 9 17 4 12"></polyline>
+				</svg>
+				Save
+			</button>
+		</div>
+	</div>
 </div>
 
 <div
@@ -1147,13 +1935,13 @@
 				</div>
 			</div>
 			<div class="amount-section">
-				<label for="craft-amount">Quantity</label>
+				<label for="craft-amount">Quantity{craftItem?.type === 'fluid' ? ' (B)' : ''}</label>
 				<input
 					type="number"
 					id="craft-amount"
 					class="amount-input"
 					min="1"
-					max="64000"
+					max={craftItem?.type === 'fluid' ? 1000 : 64000}
 					value={craftAmount}
 					on:input={(e) => {
 						const value = (e.target as HTMLInputElement | null)?.valueAsNumber;
@@ -1179,7 +1967,7 @@
 					</svg>
 					<select id="craft-cpu-select" class="cpu-select" bind:value={craftCpuName}>
 						<option value="">Auto (Any Available)</option>
-						{#each cpus as cpu, i (cpu.name ?? `cpu-${i}`)}
+						{#each cpus as cpu, i (cpu.cpuId || (cpu.name ?? `cpu-${i}`))}
 							{@const cpuName = cpu.name || `CPU ${i + 1}`}
 							{@const status = cpu.busy ? ' (Busy)' : ''}
 							<option value={cpu.name ?? ''}>{cpuName}{status}</option>
@@ -1207,6 +1995,50 @@
 	{#each tooltipHtmlLines as line, i (i)}
 		<div class="ae2web-tooltip-line">{@html line}</div>
 	{/each}
+</div>
+
+<div id="login-modal" class="modal-overlay" class:active={needsLogin} role="dialog" aria-modal="true">
+	<div class="modal-content login-modal">
+		<div class="modal-header">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M12 2a7 7 0 0 0-7 7v4a2 2 0 0 0 2 2h1v3a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-3h1a2 2 0 0 0 2-2V9a7 7 0 0 0-7-7z" />
+				<path d="M9 11h6" />
+			</svg>
+			<h3>Enter Token</h3>
+		</div>
+		<div class="modal-body">
+			<div class="login-hint">
+				Get your personal token in-game: right-click the Web Terminal block, or run <span class="mono">/ae2web token</span>.
+			</div>
+			<input
+				class="login-input"
+				type="password"
+				placeholder="Paste token…"
+				autocomplete="off"
+				autocapitalize="off"
+				spellcheck="false"
+				bind:value={loginTokenValue}
+				on:keydown={(e) => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						submitLoginToken();
+					}
+				}}
+			/>
+			{#if loginError}
+				<div class="login-error">{loginError}</div>
+			{/if}
+		</div>
+		<div class="modal-footer">
+			<button class="btn-cancel" type="button" on:click={() => setAuthToken('')}>Clear</button>
+			<button class="btn-confirm" type="button" on:click={submitLoginToken}>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<polyline points="20 6 9 17 4 12"></polyline>
+				</svg>
+				Connect
+			</button>
+		</div>
+	</div>
 </div>
 
 <ToastHost />

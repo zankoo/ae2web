@@ -60,6 +60,7 @@ AE2 Web Terminal is a Minecraft Forge mod (1.20.1) that adds a Web Terminal bloc
 - `GET /api/items` - Paginated items with search
 - `POST /api/craft` - Crafting requests (TODO: not fully implemented)
 - `GET /api/cpus` - Crafting CPU status (TODO: not fully implemented)
+- `GET /api/cpus/process` - Crafting CPU process (entries + patterns; list/tree UI)
 
 **Static Web Resources:** Served from classpath `web/` (built from `webui/build/**` during Gradle `processResources`). Source lives in `webui/` (SvelteKit SPA).
 

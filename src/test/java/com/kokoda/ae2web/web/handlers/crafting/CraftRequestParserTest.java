@@ -46,4 +46,19 @@ class CraftRequestParserTest {
         assertThatThrownBy(() -> CraftRequestParser.parse("{\"type\":\"item\",\"id\":\"minecraft:stone\",\"amount\":1000001}"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void parsesFluidAmountAsBucketsAndConvertsToMilliBuckets() throws Exception {
+        CraftRequestParser.CraftRequest req = CraftRequestParser.parse("{\"type\":\"fluid\",\"id\":\"minecraft:water\",\"amount\":64}");
+        assertThat(req.keyType()).isEqualTo(CraftRequestParser.CraftKeyType.FLUID);
+        assertThat(req.id()).isEqualTo("minecraft:water");
+        assertThat(req.amount()).isEqualTo(64_000L);
+    }
+
+    @Test
+    void parsesFluidWithDefaultAmountAsOneBucket() throws Exception {
+        CraftRequestParser.CraftRequest req = CraftRequestParser.parse("{\"type\":\"fluid\",\"id\":\"minecraft:water\"}");
+        assertThat(req.keyType()).isEqualTo(CraftRequestParser.CraftKeyType.FLUID);
+        assertThat(req.amount()).isEqualTo(1_000L);
+    }
 }

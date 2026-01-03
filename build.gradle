@@ -117,10 +117,10 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // AE2 dependency
-    compileOnly "appeng:appliedenergistics2-forge:${ae2_version}:api"
-    runtimeOnly "appeng:appliedenergistics2-forge:${ae2_version}"
+    compileOnly fg.deobf("appeng:appliedenergistics2-forge:${ae2_version}:api")
+    runtimeOnly fg.deobf("appeng:appliedenergistics2-forge:${ae2_version}")
 
-    testImplementation "appeng:appliedenergistics2-forge:${ae2_version}:api"
+    testImplementation fg.deobf("appeng:appliedenergistics2-forge:${ae2_version}:api")
 
     // Gson for JSON handling
     implementation 'com.google.code.gson:gson:2.10.1'

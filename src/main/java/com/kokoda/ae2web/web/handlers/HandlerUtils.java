@@ -12,18 +12,22 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
+import io.netty.util.AttributeKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Shared utility methods for HTTP handlers.
  */
 public final class HandlerUtils {
     public static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    public static final AttributeKey<UUID> AUTHENTICATED_USER_UUID =
+            AttributeKey.valueOf("ae2web.userUuid");
 
     private HandlerUtils() {}
 
@@ -134,5 +138,12 @@ public final class HandlerUtils {
             return null;
         }
         return getConnectedTerminal();
+    }
+
+    public static @Nullable UUID getAuthenticatedUserUuid(ChannelHandlerContext ctx) {
+        if (ctx == null) {
+            return null;
+        }
+        return ctx.channel().attr(AUTHENTICATED_USER_UUID).get();
     }
 }

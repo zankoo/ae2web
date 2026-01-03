@@ -809,16 +809,21 @@ public final class WebServer {
 
         String translationKey;
         String name;
+        List<String> tags = null;
         if (key instanceof AEItemKey itemKey) {
             translationKey = itemKey.getItem().getDescriptionId();
             name = com.kokoda.ae2web.web.inventory.InventoryNameUtils.getTranslatedName(itemKey, storage);
+            tags = itemKey.toStack().getTags()
+                    .map(tagKey -> tagKey.location().toString())
+                    .sorted()
+                    .toList();
         } else {
             AEFluidKey fluidKey = (AEFluidKey) key;
             translationKey = fluidKey.getFluid().getFluidType().getDescriptionId();
             name = com.kokoda.ae2web.web.inventory.InventoryNameUtils.getFluidName(fluidKey, storage);
         }
 
-        return new InventoryItemDTO(type, id, uniqueId, iconKey, name, translationKey, amount, namespace, craftable);
+        return new InventoryItemDTO(type, id, uniqueId, iconKey, tags, name, translationKey, amount, namespace, craftable);
     }
 
     private static final class TerminalInventoryState {

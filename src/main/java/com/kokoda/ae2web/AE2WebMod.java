@@ -12,9 +12,11 @@ import com.kokoda.ae2web.network.PacketHandler;
 import com.kokoda.ae2web.web.WebServer;
 import com.kokoda.ae2web.web.handlers.CraftingHandler;
 import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
+import com.kokoda.ae2web.server.command.TokenCommand;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -72,5 +74,10 @@ public class AE2WebMod {
         CraftingHandler.shutdownExecutor();
         PrerenderStorageService.getInstance().shutdownMaintenance();
         WebServer.getInstance().stop();
+    }
+
+    @SubscribeEvent
+    public void onRegisterCommands(RegisterCommandsEvent event) {
+        TokenCommand.register(event.getDispatcher());
     }
 }

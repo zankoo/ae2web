@@ -3,12 +3,16 @@ package com.kokoda.ae2web.web.dto;
 import appeng.api.stacks.AEItemKey;
 import com.kokoda.ae2web.util.IconKeyUtils;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+
+import java.util.List;
 
 public class ItemStackDTO {
     private final String type = "item";
     private final String id;
     private final String uniqueId;
     private final String iconKey;  // For NBT-aware icon requests
+    private final List<String> tags;
     private final String name;
     private final String translationKey;
     private final long amount;
@@ -21,6 +25,11 @@ public class ItemStackDTO {
         this.iconKey = IconKeyUtils.iconKey(key);
         this.uniqueId = "item:" + this.iconKey;
         this.namespace = itemId.getNamespace();
+        this.tags = key.toStack().getTags()
+                .map(TagKey::location)
+                .map(ResourceLocation::toString)
+                .sorted()
+                .toList();
         this.name = name;
         this.translationKey = translationKey;
         this.amount = amount;
@@ -37,6 +46,10 @@ public class ItemStackDTO {
 
     public String getIconKey() {
         return iconKey;
+    }
+
+    public List<String> getTags() {
+        return tags;
     }
 
     public String getName() {

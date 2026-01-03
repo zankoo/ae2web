@@ -16,7 +16,22 @@ public final class IconKeyUtils {
     private IconKeyUtils() {}
 
     public static String iconKey(AEKey key) {
-        return key.getId().toString() + "@h1_" + sha256Hex(serializeKey(key));
+        if (key == null) {
+            return "";
+        }
+
+        ResourceLocation id = key.getId();
+        if (id == null) {
+            return "";
+        }
+
+        try {
+            return id + "@h1_" + sha256Hex(serializeKey(key));
+        } catch (RuntimeException e) {
+            // In some contexts (e.g. plain unit tests), AE2 key type registry may not be initialized yet.
+            // Fall back to an id-only hash to keep behavior stable and non-crashing.
+            return iconKey(id);
+        }
     }
 
     /**

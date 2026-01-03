@@ -33,11 +33,24 @@ export type InventoryItem = {
 	namespace: string;
 	amount: number;
 	craftable: boolean;
+	tags?: string[];
 };
 
 export type InventoryResponse = {
 	items: InventoryItem[];
 	total: number;
+};
+
+export type InventoryCategoryRule = {
+	name: string;
+	tagRegex: string;
+};
+
+export type InventoryViewConfig = {
+	whitelist: string[];
+	blacklist: string[];
+	categories: InventoryCategoryRule[];
+	collapsed: Record<string, boolean>;
 };
 
 export type GenericStackDto = {
@@ -59,6 +72,7 @@ export type CpuJobStatusDto = {
 };
 
 export type CpuDto = {
+	cpuId: string;
 	busy: boolean;
 	availableStorage: number;
 	coProcessors: number;
@@ -92,4 +106,42 @@ export type CraftMissingResponse = {
 export type TooltipResponse = {
 	iconKey: string;
 	tooltip: string[];
+};
+
+export type CpuProcessSummaryDto = {
+	finalOutput?: GenericStackDto;
+	outputTotal?: number;
+	outputDone?: number;
+	outputRemaining?: number;
+	totalItems?: number;
+	progress?: number;
+	elapsedTimeNanos?: number;
+};
+
+export type CpuProcessEntryDto = {
+	stack: GenericStackDto;
+	stored: number;
+	waiting: number;
+	active: number;
+};
+
+export type CpuProcessPatternInputDto = {
+	multiplier: number;
+	choices: GenericStackDto[];
+};
+
+export type CpuProcessPatternDto = {
+	patternId: string;
+	remainingRuns: number;
+	outputs: GenericStackDto[];
+	inputs: CpuProcessPatternInputDto[];
+};
+
+export type CpuProcessResponse = {
+	cpuId: string;
+	busy: boolean;
+	name: string | null;
+	summary: CpuProcessSummaryDto;
+	entries: CpuProcessEntryDto[];
+	patterns: CpuProcessPatternDto[];
 };

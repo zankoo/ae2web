@@ -1,15 +1,66 @@
-import { readable } from 'svelte/store';
+import { writable } from 'svelte/store';
 
 export function readTokenFromUrl(url: URL): string {
 	return url.searchParams.get('token') ?? '';
 }
 
-export const authToken = readable<string>('', (set) => {
+const STORAGE_KEY = 'ae2web.authToken';
+
+type StorageLike = {
+	getItem: (key: string) => string | null;
+	setItem: (key: string, value: string) => void;
+	removeItem: (key: string) => void;
+};
+
+function normalizeToken(token: string): string {
+	return String(token ?? '').trim();
+}
+
+function safeStorage(): StorageLike | null {
 	try {
-		set(readTokenFromUrl(new URL(window.location.href)));
+		const storage: any = (globalThis as any).localStorage;
+		if (!storage) return null;
+		if (typeof storage.getItem !== 'function') return null;
+		if (typeof storage.setItem !== 'function') return null;
+		if (typeof storage.removeItem !== 'function') return null;
+		return storage as StorageLike;
 	} catch {
-		set('');
+		return null;
 	}
-	return () => {};
+}
+
+function readTokenFromStorage(): string {
+	const storage = safeStorage();
+	if (!storage) return '';
+	const raw = storage.getItem(STORAGE_KEY) ?? '';
+	return normalizeToken(raw);
+}
+
+function initialToken(): string {
+	try {
+		const fromUrl = normalizeToken(readTokenFromUrl(new URL(window.location.href)));
+		if (fromUrl) return fromUrl;
+	} catch {
+		// ignore
+	}
+	return readTokenFromStorage();
+}
+
+export const authToken = writable<string>(initialToken());
+
+authToken.subscribe((token) => {
+	const storage = safeStorage();
+	if (!storage) return;
+
+	const normalized = normalizeToken(token);
+	if (normalized) {
+		storage.setItem(STORAGE_KEY, normalized);
+	} else {
+		storage.removeItem(STORAGE_KEY);
+	}
 });
+
+export function setAuthToken(token: string): void {
+	authToken.set(normalizeToken(token));
+}
 

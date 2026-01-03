@@ -3,6 +3,13 @@ package com.kokoda.ae2web.web.handlers.crafting;
 import appeng.api.config.CpuSelectionMode;
 import appeng.api.networking.crafting.CraftingJobStatus;
 import appeng.api.networking.crafting.ICraftingCPU;
+import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.GenericStack;
+import com.kokoda.ae2web.util.IconKeyUtils;
+import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Items;
 import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +36,34 @@ class CpuHandlerTest {
         assertThat(jobStatus.get("outputTotal")).isEqualTo(100L);
         assertThat(jobStatus.get("outputDone")).isEqualTo(60L);
         assertThat(jobStatus.get("outputRemaining")).isEqualTo(40L);
+    }
+
+    @Test
+    void genericStackToJsonStripsFormattingFromCachedTranslation() throws Exception {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        PrerenderStorageService storage = PrerenderStorageService.getInstance();
+        storage.initialize();
+        storage.clearAll();
+
+        AEItemKey itemKey = AEItemKey.of(Items.STONE);
+        String iconKey = IconKeyUtils.iconKey(itemKey);
+        storage.saveIcon(iconKey, minimalPngHeader(), "256安§4UHV§r激光源仓", null);
+
+        Method genericStackToJson = CpuHandler.class.getDeclaredMethod("genericStackToJson", GenericStack.class, PrerenderStorageService.class);
+        genericStackToJson.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> json = (Map<String, Object>) genericStackToJson.invoke(null, new GenericStack(itemKey, 1), storage);
+
+        assertThat(json.get("name")).isEqualTo("256安UHV激光源仓");
+    }
+
+    private static byte[] minimalPngHeader() {
+        return new byte[]{
+                (byte) 0x89, 0x50, 0x4E, 0x47,
+                0x0D, 0x0A, 0x1A, 0x0A
+        };
     }
 
     private static final class DummyCpu implements ICraftingCPU {

@@ -2,7 +2,9 @@ package com.kokoda.ae2web.network;
 
 import com.kokoda.ae2web.AE2WebMod;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public class PacketHandler {
@@ -26,10 +28,25 @@ public class PacketHandler {
                 RenameTerminalPacket::handle
         );
 
+        CHANNEL.registerMessage(
+                packetId++,
+                CopyToClipboardPacket.class,
+                CopyToClipboardPacket::encode,
+                CopyToClipboardPacket::decode,
+                CopyToClipboardPacket::handle
+        );
+
         AE2WebMod.LOGGER.info("Registered network packets");
     }
 
     public static void sendToServer(Object msg) {
         CHANNEL.sendToServer(msg);
+    }
+
+    public static void sendToPlayer(ServerPlayer player, Object msg) {
+        if (player == null || msg == null) {
+            return;
+        }
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), msg);
     }
 }

@@ -12,3 +12,16 @@ export function formatNumber(num: number): string {
 	return String(num).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+export function formatFluidAmount(milliBuckets: number): string {
+	if (!Number.isFinite(milliBuckets)) {
+		return '';
+	}
+
+	const buckets = milliBuckets / 1000;
+	if (buckets >= 1000) {
+		return `${formatAmount(buckets)}B`;
+	}
+
+	const text = buckets.toFixed(3).replace(/\.?0+$/, '');
+	return `${text}B`;
+}

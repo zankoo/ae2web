@@ -3,6 +3,8 @@ package com.kokoda.ae2web.block;
 import com.kokoda.ae2web.blockentity.WebTerminalBlockEntity;
 import com.kokoda.ae2web.config.AE2WebConfig;
 import com.kokoda.ae2web.registry.ModBlockEntities;
+import com.kokoda.ae2web.util.ChatComponentUtils;
+import com.kokoda.ae2web.web.auth.PlayerAuthService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -56,11 +58,21 @@ public class WebTerminalBlock extends Block implements EntityBlock {
             return;
         }
 
-        String url = "http://localhost:" + AE2WebConfig.getHttpPort();
+        String baseUrl = "http://localhost:" + AE2WebConfig.getHttpPort();
         player.sendSystemMessage(Component.literal("Access URL: ").withStyle(ChatFormatting.GRAY)
-                .append(Component.literal(url).withStyle(ChatFormatting.AQUA)));
+                .append(ChatComponentUtils.copyToClipboardText(baseUrl, ChatFormatting.AQUA)));
         player.sendSystemMessage(Component.literal("Terminal ID: ").withStyle(ChatFormatting.GRAY)
-                .append(Component.literal(terminal.getTerminalId()).withStyle(ChatFormatting.YELLOW)));
+                .append(ChatComponentUtils.copyToClipboardText(terminal.getTerminalId(), ChatFormatting.YELLOW)));
+
+        if (player instanceof ServerPlayer serverPlayer) {
+            String token = PlayerAuthService.getInstance().getOrCreateToken(serverPlayer.getUUID());
+            String personalUrl = baseUrl + "/?token=" + token;
+            player.sendSystemMessage(Component.literal("Personal URL: ").withStyle(ChatFormatting.GRAY)
+                    .append(ChatComponentUtils.copyToClipboardText(personalUrl, ChatFormatting.AQUA)));
+            player.sendSystemMessage(Component.literal("Token: ").withStyle(ChatFormatting.GRAY)
+                    .append(ChatComponentUtils.copyToClipboardText(token, ChatFormatting.YELLOW)));
+            player.sendSystemMessage(Component.literal("Keep this token secret.").withStyle(ChatFormatting.DARK_GRAY));
+        }
     }
 
     @Nullable

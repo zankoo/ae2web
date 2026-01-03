@@ -75,6 +75,7 @@ class SseHandlerTest {
                 "minecraft:stone",
                 "item:minecraft:stone@h1_test",
                 "minecraft:stone@h1_test",
+                List.of(),
                 "Stone",
                 "block.minecraft.stone",
                 64,

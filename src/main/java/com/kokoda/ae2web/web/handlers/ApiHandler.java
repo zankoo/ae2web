@@ -2,6 +2,8 @@ package com.kokoda.ae2web.web.handlers;
 
 import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.config.AE2WebConfig;
+import com.kokoda.ae2web.web.auth.AuthTokenExtractor;
+import com.kokoda.ae2web.web.auth.PlayerAuthService;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.*;
@@ -9,6 +11,7 @@ import io.netty.handler.codec.http.*;
 import java.io.InputStream;
 import java.util.Locale;
 import java.util.*;
+import java.util.UUID;
 
 import static com.kokoda.ae2web.web.handlers.HandlerUtils.*;
 
@@ -34,6 +37,8 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             return;
         }
 
+        ctx.channel().attr(AUTHENTICATED_USER_UUID).set(null);
+
         if (path != null && path.startsWith("/api/")) {
             if (!checkAuth(request, headers, ctx)) {
                 return;
@@ -50,27 +55,25 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     }
 
     private boolean checkAuth(FullHttpRequest request, HttpHeaders headers, ChannelHandlerContext ctx) {
+        String token = AuthTokenExtractor.extractToken(request);
+
+        UUID userUuid = null;
+        if (token != null) {
+            userUuid = PlayerAuthService.getInstance().authenticate(token);
+        }
+        ctx.channel().attr(AUTHENTICATED_USER_UUID).set(userUuid);
+
         if (!AE2WebConfig.isAuthEnabled()) {
             return true;
         }
 
-        String authHeader = request.headers().get(HttpHeaderNames.AUTHORIZATION);
-        String expectedToken = "Bearer " + AE2WebConfig.getAuthToken();
-        if (authHeader != null && authHeader.equals(expectedToken)) {
+        if (userUuid != null) {
             return true;
         }
 
-        // Browser EventSource cannot set Authorization headers; allow ?token=... as fallback.
-        try {
-            QueryStringDecoder decoder = new QueryStringDecoder(request.uri());
-            List<String> tokens = decoder.parameters().get("token");
-            if (tokens != null && !tokens.isEmpty()) {
-                String token = tokens.get(0);
-                if (token != null && token.equals(AE2WebConfig.getAuthToken())) {
-                    return true;
-                }
-            }
-        } catch (Exception ignored) {
+        // Legacy shared token support (does not map to a player UUID).
+        if (token != null && token.equals(AE2WebConfig.getAuthToken())) {
+            return true;
         }
 
         sendJsonResponse(ctx, HttpResponseStatus.UNAUTHORIZED,
@@ -113,6 +116,20 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             }
             case "/api/cpus" ->
                     CraftingHandler.handleCpus(ctx, request, params, headers);
+            case "/api/cpus/process" -> {
+                if (method == HttpMethod.GET) {
+                    CraftingHandler.handleCpuProcess(ctx, request, params, headers);
+                } else {
+                    sendMethodNotAllowed(ctx, headers);
+                }
+            }
+            case "/api/user/inventoryConfig" -> {
+                if (method == HttpMethod.GET || method == HttpMethod.POST) {
+                    UserConfigHandler.handleInventoryConfig(ctx, request, params, headers);
+                } else {
+                    sendMethodNotAllowed(ctx, headers);
+                }
+            }
             default -> {
                 if (path.startsWith("/api/prerender/")) {
                     PrerenderHandler.route(ctx, request, path, method, params, headers);

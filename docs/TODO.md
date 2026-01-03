@@ -4,8 +4,29 @@
 
 ## In Progress
 
-
 ## Completed
+
+- [x] FIX-35: Remove all FLIP-based inventory reorder animations
+- [x] FIX-34: Keep inventory category headers even when empty (avoid flicker when items appear/disappear)
+- [x] MINOR-11: Add draggable reorder handles for inventory category rules (order matters)
+- [x] FIX-33: Fix tag blacklist behavior (do not hide items with no tags when only blacklist is set)
+- [x] MINOR-10: Make `/ae2web token` + terminal status chat text click-to-copy and auto-copy token to clipboard
+- [x] FIX-32: Fix `/api/user/inventoryConfig` POST 500 due to Netty request auto-release (refCnt=0)
+
+- [x] FIX-31: Faster Crafting Process polling + completion toast + clear stale rows
+- [x] HIGH-2026-8: Add `/api/cpus/process` endpoint for CPU crafting breakdown (entries + patterns)
+- [x] MED-2026-2: Add unit tests for CPU process endpoint
+- [x] HIGH-2026-9: Add webui CPU process modal (list + status tree + dependency tree)
+- [x] HIGH-2026-10: Add per-player token login (URL + /ae2web token) and wire into API auth
+- [x] HIGH-2026-11: Add per-player per-terminal inventory view config API (whitelist/blacklist + categories + collapsed)
+- [x] HIGH-2026-12: Include item tag list in inventory payloads (items only; SSE snapshot/delta)
+- [x] HIGH-2026-13: WebUI login gate + token persistence (per player)
+- [x] HIGH-2026-14: WebUI tag-based inventory grouping with collapsible categories + Fluids section in All view
+
+- [x] FIX-27: 流体数量单位显示为 B（1B = 1000mB）
+- [x] FIX-28: /api/cpus 返回的 crafting.name 去除 §d 等格式化标签
+- [x] FIX-29: 点击 CPU 卡片不再右下角弹窗（toast）
+- [x] FIX-30: 流体合成请求按 B（桶）计量（amount=64 => 64B）
 
 - [x] HIGH-2026-3: 首次使用时（prerender 目录为空）自动全量申请预渲染（避免必须滚动才逐步补齐）
 - [x] FIX-26: 预渲染上传完成后自动刷新物品/流体名称（不需要手动刷新页面）

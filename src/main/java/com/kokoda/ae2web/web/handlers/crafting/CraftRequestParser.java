@@ -8,6 +8,7 @@ import static com.kokoda.ae2web.web.handlers.HandlerUtils.GSON;
 
 public final class CraftRequestParser {
     private static final long MAX_CRAFT_AMOUNT = 1_000_000;
+    private static final long MILLI_BUCKETS_PER_BUCKET = 1_000;
 
     private CraftRequestParser() {}
 
@@ -52,16 +53,25 @@ public final class CraftRequestParser {
             throw new IllegalArgumentException("id required");
         }
 
-        long amount = 1;
+        long requestedAmount = 1;
         if (json.has("amount")) {
             try {
-                amount = json.get("amount").getAsLong();
+                requestedAmount = json.get("amount").getAsLong();
             } catch (Exception e) {
                 throw new IllegalArgumentException("Invalid amount", e);
             }
         }
 
-        if (amount <= 0 || amount > MAX_CRAFT_AMOUNT) {
+        long normalizedAmount;
+        try {
+            normalizedAmount = keyType == CraftKeyType.FLUID
+                    ? Math.multiplyExact(requestedAmount, MILLI_BUCKETS_PER_BUCKET)
+                    : requestedAmount;
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("Invalid amount", e);
+        }
+
+        if (normalizedAmount <= 0 || normalizedAmount > MAX_CRAFT_AMOUNT) {
             throw new IllegalArgumentException("Invalid amount");
         }
 
@@ -81,7 +91,6 @@ public final class CraftRequestParser {
             }
         }
 
-        return new CraftRequest(keyType, id, amount, cpuName, terminalId);
+        return new CraftRequest(keyType, id, normalizedAmount, cpuName, terminalId);
     }
 }
-

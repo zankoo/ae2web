@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { apiJson, withTokenQuery } from '$lib/api/client';
+import { setAuthToken } from '$lib/stores/session';
 
 function setUrl(url: string): void {
 	window.history.replaceState({}, '', url);
@@ -9,6 +10,7 @@ function setUrl(url: string): void {
 describe('api client', () => {
 	it('adds Authorization header when token exists', async () => {
 		setUrl('/?token=abc');
+		setAuthToken('abc');
 
 		const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
 			return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -25,6 +27,7 @@ describe('api client', () => {
 
 	it('uses server error JSON when present', async () => {
 		setUrl('/?token=abc');
+		setAuthToken('abc');
 
 		const fetchMock = vi.fn(async () => {
 			return new Response(JSON.stringify({ error: 'Unauthorized - Invalid or missing token' }), {
@@ -38,6 +41,7 @@ describe('api client', () => {
 
 	it('appends token query param for EventSource/img', () => {
 		setUrl('/?token=xyz');
+		setAuthToken('xyz');
 		expect(withTokenQuery('/api/events/inventory?terminalId=t1')).toContain('token=xyz');
 	});
 });

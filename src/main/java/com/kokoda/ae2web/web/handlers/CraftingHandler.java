@@ -1,6 +1,7 @@
 package com.kokoda.ae2web.web.handlers;
 
 import com.kokoda.ae2web.web.handlers.crafting.CpuHandler;
+import com.kokoda.ae2web.web.handlers.crafting.CpuProcessHandler;
 import com.kokoda.ae2web.web.handlers.crafting.CraftRequestHandler;
 import com.kokoda.ae2web.web.handlers.crafting.CraftingExecutors;
 import io.netty.channel.ChannelHandlerContext;
@@ -29,5 +30,10 @@ public final class CraftingHandler {
     public static void handleCpus(ChannelHandlerContext ctx, FullHttpRequest request,
                                   Map<String, List<String>> params, HttpHeaders headers) {
         CpuHandler.handleCpus(ctx, request, params, headers);
+    }
+
+    public static void handleCpuProcess(ChannelHandlerContext ctx, FullHttpRequest request,
+                                        Map<String, List<String>> params, HttpHeaders headers) {
+        CpuProcessHandler.handleCpuProcess(ctx, request, params, headers);
     }
 }
