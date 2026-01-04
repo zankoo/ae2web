@@ -157,7 +157,7 @@
 		box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.08);
 	}
 
-	.cpu-dep-icon {
+	.cpu-dep-row :global(.cpu-dep-icon) {
 		width: 20px;
 		height: 20px;
 		image-rendering: pixelated;

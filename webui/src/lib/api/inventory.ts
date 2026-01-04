@@ -1,5 +1,6 @@
 import { apiJson, withTokenQuery } from '$lib/api/client';
 import type { InventoryItem, InventoryResponse } from '$lib/api/types';
+import { isMockEnabled, mockFetchItems, mockOpenInventorySse } from '$lib/mock/handlers';
 
 export type InventoryFilter = 'all' | 'items' | 'fluids';
 
@@ -7,6 +8,9 @@ export async function fetchInventory(
 	terminalId: string,
 	filter: InventoryFilter
 ): Promise<InventoryResponse> {
+	if (isMockEnabled()) {
+		return mockFetchItems({ terminalId });
+	}
 	const params = new URLSearchParams({ type: filter });
 	if (terminalId) {
 		params.set('terminalId', terminalId);
@@ -40,7 +44,11 @@ export type InventorySseHandlers = {
 	onError?: (evt: Event) => void;
 };
 
-export function openInventorySse(terminalId: string, handlers: InventorySseHandlers): EventSource {
+export function openInventorySse(terminalId: string, handlers: InventorySseHandlers): EventSource | { close: () => void } {
+	if (isMockEnabled()) {
+		return mockOpenInventorySse(terminalId, handlers);
+	}
+
 	const url = withTokenQuery(`/api/events/inventory?terminalId=${encodeURIComponent(terminalId)}`);
 	const es = new EventSource(url);
 

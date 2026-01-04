@@ -1,9 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 
-	import '@fontsource/inter/latin-400.css';
-	import '@fontsource/inter/latin-600.css';
-	import '@fontsource/inter/latin-700.css';
+	// Keep JetBrains Mono for monospace (local font)
 	import '@fontsource/jetbrains-mono/latin-500.css';
 
 	import favicon from '$lib/assets/favicon.svg';
@@ -16,4 +14,6 @@
 	<title>AE2 Web Terminal</title>
 </svelte:head>
 
-{@render children()}
+<div class="min-h-screen bg-base-100">
+	{@render children()}
+</div>

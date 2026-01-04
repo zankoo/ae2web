@@ -48,7 +48,7 @@
 		min-width: 0;
 	}
 
-	.cpu-process-tree-icon {
+	.cpu-process-tree-item :global(.cpu-process-tree-icon) {
 		width: 20px;
 		height: 20px;
 		image-rendering: pixelated;

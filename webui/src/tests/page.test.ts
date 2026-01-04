@@ -217,7 +217,8 @@ describe('+page CPU interactions', () => {
 			await findByText('Crafting Process');
 			expect(vi.mocked(fetchCpuProcess)).toHaveBeenCalledTimes(1);
 
-			await vi.advanceTimersByTimeAsync(600);
+			// Auto-refresh interval is 2000ms
+			await vi.advanceTimersByTimeAsync(2100);
 			expect(vi.mocked(fetchCpuProcess)).toHaveBeenCalledTimes(2);
 
 			expect(vi.mocked(showToast)).toHaveBeenCalled();

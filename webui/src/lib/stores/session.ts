@@ -1,10 +1,28 @@
 import { writable } from 'svelte/store';
+import { browser } from '$app/environment';
 
 export function readTokenFromUrl(url: URL): string {
 	return url.searchParams.get('token') ?? '';
 }
 
 const STORAGE_KEY = 'ae2web.authToken';
+
+// Check for mock mode early and set token if needed
+function initMockModeToken(): void {
+	if (!browser) return;
+	try {
+		const urlParams = new URLSearchParams(window.location.search);
+		if (urlParams.get('mock') === 'true') {
+			localStorage.setItem('ae2web-mock', 'true');
+			localStorage.setItem(STORAGE_KEY, 'mock-token');
+		}
+	} catch {
+		// ignore
+	}
+}
+
+// Initialize mock mode before reading token
+initMockModeToken();
 
 type StorageLike = {
 	getItem: (key: string) => string | null;

@@ -2,9 +2,11 @@
 	import { toastStore } from '$lib/stores/toast';
 </script>
 
-<div id="toast-container">
+<div class="fixed top-4 right-4 z-50 flex flex-col gap-2">
 	{#each $toastStore as toast (toast.id)}
-		<div class={`toast ${toast.type}`}>{toast.message}</div>
+		<div class="toast alert {toast.type === 'error' ? 'alert-error' : toast.type === 'success' ? 'alert-success' : 'alert-info'} shadow-lg animate-slide-up">
+			<span>{toast.message}</span>
+		</div>
 	{/each}
 </div>
 
