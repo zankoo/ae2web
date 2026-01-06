@@ -27,7 +27,14 @@
 </script>
 
 <div class="dropdown dropdown-end" bind:this={containerEl}>
-	<button type="button" class="btn btn-outline btn-sm gap-2 font-sans" onclick={onToggleDropdown}>
+	<button
+		type="button"
+		class="btn btn-outline btn-sm gap-2 font-sans"
+		onclick={(e) => {
+			e.stopPropagation();
+			onToggleDropdown();
+		}}
+	>
 		<span
 			class="status status-sm {online
 				? 'status-success shadow-[0_0_8px_var(--color-success)]'
@@ -56,7 +63,10 @@
 							class="font-sans text-sm rounded-lg hover:bg-muted {t.id === terminalId
 								? 'bg-muted text-accent font-bold'
 								: ''}"
-							onclick={() => onSelectTerminal(t)}
+							onclick={(e) => {
+								e.stopPropagation();
+								onSelectTerminal(t);
+							}}
 						>
 							{t.displayName}
 						</button>

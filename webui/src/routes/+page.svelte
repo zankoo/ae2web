@@ -1167,7 +1167,7 @@
 			></div>
 		</div>
 
-		<div class="flex items-center justify-between px-4 lg:px-6 py-4 relative">
+		<div class="flex items-center justify-between px-4 lg:px-6 py-4 relative h-[72px]">
 			<!-- Left: Logo, Title, Selector & Settings -->
 			<div class="flex items-center gap-4">
 				<!-- Logo & Title -->
@@ -1180,24 +1180,6 @@
 					<h1 class="text-2xl md:text-3xl font-display font-normal tracking-tight text-foreground">
 						AE2 <GradientText>Web</GradientText>
 					</h1>
-				</div>
-
-				<div class="w-px h-8 bg-border/50"></div>
-
-				<!-- Navigation Tabs -->
-				<div class="tabs tabs-boxed bg-muted/50 p-1">
-					<a
-						href={resolve('/')}
-						class="tab tab-sm {$page.url.pathname === '/' ? 'tab-active' : ''}"
-					>
-						Inventory
-					</a>
-					<a
-						href={resolve('/dashboard')}
-						class="tab tab-sm {$page.url.pathname === '/dashboard' ? 'tab-active' : ''}"
-					>
-						Dashboard
-					</a>
 				</div>
 
 				<div class="w-px h-8 bg-border/50"></div>
@@ -1242,6 +1224,24 @@
 						></path></svg
 					>
 				</button>
+			</div>
+
+			<!-- Center: Navigation Tabs -->
+			<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+				<div class="tabs tabs-boxed bg-muted/50 p-1">
+					<a
+						href={resolve('/')}
+						class="tab tab-sm {$page.url.pathname === '/' ? 'tab-active' : ''}"
+					>
+						Inventory
+					</a>
+					<a
+						href={resolve('/dashboard')}
+						class="tab tab-sm {$page.url.pathname === '/dashboard' ? 'tab-active' : ''}"
+					>
+						Dashboard
+					</a>
+				</div>
 			</div>
 
 			<!-- Right: Stats -->

@@ -146,14 +146,69 @@ cd webui && npm run test          # Frontend tests
 1. 流程技能优先（brainstorming, debugging）- 决定如何处理任务
 2. 实现技能其次（frontend-design, mcp-builder）- 指导执行
 
+### Worktree 强制规则
+
+**每次代码变更或创建 subagent 时，必须先使用 `superpowers:using-git-worktrees` 技能创建隔离的 worktree。**
+
+这是为了：
+- 保证并行开发的隔离性
+- 支持多个 subagent 同时工作而不冲突
+- 保持主分支干净
+
+**唯一例外：** 仅修改文档（如 CLAUDE.md）或执行简单的 git 操作（如 commit）时可跳过。
+
 ### 技能触发表
+
+#### 开发流程技能 (superpowers)
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `brainstorming` | Before writing code | Refines rough ideas through questions, explores alternatives, presents design in sections for validation. Saves design document. |
-| `using-git-worktrees` | After design approval | Creates isolated workspace on new branch, runs project setup, verifies clean test baseline. |
-| `writing-plans` | With approved design | Breaks work into bite-sized tasks (2-5 minutes each). Every task has exact file paths, complete code, verification steps. |
-| `subagent-driven-development` or `executing-plans` | With plan | Dispatches fresh subagent per task with two-stage review (spec compliance, then code quality), or executes in batches with human checkpoints. |
-| `test-driven-development` | During implementation | Enforces RED-GREEN-REFACTOR: write failing test, watch it fail, write minimal code, watch it pass, commit. Deletes code written before tests. |
-| `requesting-code-review` | Between tasks | Reviews against plan, reports issues by severity. Critical issues block progress. |
-| `finishing-a-development-branch` | When tasks complete | Verifies tests, presents options (merge/PR/keep/discard), cleans up worktree. |
+| `superpowers:brainstorming` | **创意工作前（强制）** | 通过提问细化想法，探索替代方案，分段呈现设计供验证，保存设计文档 |
+| `superpowers:using-git-worktrees` | **每次代码变更或创建 subagent（强制）** | 在新分支上创建隔离工作区，运行项目设置，验证测试基线 |
+| `superpowers:writing-plans` | 有规格或需求时 | 将工作拆分为小任务（每个 2-5 分钟），包含精确文件路径、完整代码、验证步骤 |
+| `superpowers:executing-plans` | 有实现计划时 | 在独立会话中按任务执行计划，带审查检查点 |
+| `superpowers:subagent-driven-development` | 当前会话执行计划 | 为每个任务分派 subagent，两阶段审查（规格合规 + 代码质量） |
+| `superpowers:dispatching-parallel-agents` | 有 2+ 独立任务时 | 并行处理无共享状态或顺序依赖的独立任务 |
+| `superpowers:test-driven-development` | 实现功能或修复 bug 时 | 强制 RED-GREEN-REFACTOR：写失败测试 → 看它失败 → 写最小代码 → 看它通过 → 提交 |
+| `superpowers:systematic-debugging` | 遇到 bug、测试失败或异常行为时 | 在提出修复方案前系统性调试 |
+| `superpowers:verification-before-completion` | 声称工作完成前 | 运行验证命令并确认输出后才能声称成功 |
+| `superpowers:requesting-code-review` | 完成任务或重大功能后 | 根据计划审查，按严重性报告问题，关键问题阻止进度 |
+| `superpowers:receiving-code-review` | 收到代码审查反馈时 | 技术严谨和验证，不盲目同意或实现 |
+| `superpowers:finishing-a-development-branch` | 任务完成时 | 验证测试，提供选项（merge/PR/keep/discard），清理 worktree |
+| `superpowers:writing-skills` | 创建或编辑技能时 | 创建、编辑或验证技能 |
+| `superpowers:using-superpowers` | 开始任何对话时 | 建立如何查找和使用技能 |
+
+#### 代码质量技能
+
+| Skill | Trigger | Purpose |
+|-------|---------|---------|
+| `taste-check` | 审查代码质量时 | 用 Linus Torvalds "好品味"哲学审查代码，消除防御性代码、特殊情况、深层嵌套 |
+| `code-review:code-review` | 审查 PR 时 | 对 pull request 进行代码审查 |
+
+#### Git 操作技能
+
+| Skill | Trigger | Purpose |
+|-------|---------|---------|
+| `commit-commands:commit` | 需要提交时 | 创建 git commit |
+| `commit-commands:commit-push-pr` | 需要提交并创建 PR 时 | 提交、推送并打开 PR |
+| `commit-commands:clean_gone` | 清理分支时 | 清理所有标记为 [gone] 的 git 分支（远程已删除但本地仍存在） |
+
+#### 研究技能
+
+| Skill | Trigger | Purpose |
+|-------|---------|---------|
+| `research` | 需要调研库、API、模式时 | 使用 searchGitHub 和 Exa 工具研究，查找真实实现，保存结构化报告到 docs/research/ |
+
+#### 前端技能
+
+| Skill | Trigger | Purpose |
+|-------|---------|---------|
+| `frontend-design:frontend-design` | 构建 web 组件、页面或应用时 | 创建独特、生产级的前端界面，避免通用 AI 美学 |
+
+#### Ralph Wiggum 技能
+
+| Skill | Trigger | Purpose |
+|-------|---------|---------|
+| `ralph-wiggum:ralph-loop` | 需要持续迭代时 | 在当前会话启动 Ralph Wiggum 循环 |
+| `ralph-wiggum:cancel-ralph` | 需要取消循环时 | 取消活跃的 Ralph Wiggum 循环 |
+| `ralph-wiggum:help` | 了解技术时 | 解释 Ralph Wiggum 技术和可用命令 |

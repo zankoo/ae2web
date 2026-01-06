@@ -18,3 +18,6 @@ Thumbs.db
 # Minecraft
 run/
 logs/
+
+# Local docs (plans, research, etc.)
+docs/

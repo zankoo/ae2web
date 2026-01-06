@@ -397,8 +397,8 @@
 			></div>
 		</div>
 
-		<div class="flex items-center justify-between px-4 lg:px-6 py-4 relative">
-			<!-- Left: Logo, Title, Nav, Selector -->
+		<div class="flex items-center justify-between px-4 lg:px-6 py-4 relative h-[72px]">
+			<!-- Left: Logo, Title, Selector -->
 			<div class="flex items-center gap-4">
 				<!-- Logo & Title -->
 				<div class="flex items-center gap-3">
@@ -414,7 +414,20 @@
 
 				<div class="w-px h-8 bg-border/50"></div>
 
-				<!-- Navigation Tabs -->
+				<!-- Terminal Selector -->
+				<TerminalSelector
+					{online}
+					displayName={terminalDisplayName}
+					{terminalId}
+					{connectedTerminals}
+					dropdownOpen={terminalDropdownOpen}
+					onToggleDropdown={openTerminalDropdown}
+					onSelectTerminal={selectTerminal}
+				/>
+			</div>
+
+			<!-- Center: Navigation Tabs -->
+			<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
 				<div class="tabs tabs-boxed bg-muted/50 p-1">
 					<a
 						href={resolve('/')}
@@ -429,19 +442,6 @@
 						Dashboard
 					</a>
 				</div>
-
-				<div class="w-px h-8 bg-border/50"></div>
-
-				<!-- Terminal Selector -->
-				<TerminalSelector
-					{online}
-					displayName={terminalDisplayName}
-					{terminalId}
-					{connectedTerminals}
-					dropdownOpen={terminalDropdownOpen}
-					onToggleDropdown={openTerminalDropdown}
-					onSelectTerminal={selectTerminal}
-				/>
 			</div>
 
 			<!-- Right: Add Widget Button -->
