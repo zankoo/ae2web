@@ -11,7 +11,6 @@
 	import { submitCraft } from '$lib/api/craft';
 	import { openInventorySse, type InventoryFilter } from '$lib/api/inventory';
 	import { fetchInventoryViewConfig, saveInventoryViewConfig } from '$lib/api/userConfig';
-	import { fetchTooltip } from '$lib/api/prerender';
 	import type {
 		CpuDto,
 		CpuProcessResponse,
@@ -48,11 +47,13 @@
 	} from '$lib/stores/terminal';
 	import { formatAmount, formatNumber } from '$lib/utils/format';
 	import { buildInventoryRenderNodes } from '$lib/utils/inventoryGrouping';
-	import { sortInventoryItems } from '$lib/utils/inventorySort';
-	import { legacyTextToHtml } from '$lib/utils/minecraftText';
-	import { matchItem } from '$lib/utils/pinyin';
 	import { ProductionStatsTracker } from '$lib/utils/productionStats';
-	import { createTooltipPositioner, type TooltipPositioner } from '$lib/utils/tooltipPositioner';
+	import { displayNameFor } from '$lib/pages/inventory/displayName';
+	import { captureScrollAnchor, restoreScrollAnchor } from '$lib/pages/inventory/scrollAnchor';
+	import { createCpuProcessController } from '$lib/pages/inventory/useCpuProcess';
+	import { createInventoryConfigController } from '$lib/pages/inventory/useInventoryConfig';
+	import { createTooltipController } from '$lib/pages/inventory/useTooltip';
+	import { computeVisibleItems, hasPositionChanged } from '$lib/pages/inventory/visibleItems';
 	import {
 		loadTerminalHistory,
 		queueHistoryUpdate,
@@ -153,6 +154,78 @@
 	let inventorySettingsSaving = $state(false);
 	let inventorySettingsError = $state<string | null>(null);
 
+	const inventoryConfigController = createInventoryConfigController({
+		view: {
+			get config() {
+				return inventoryViewConfig;
+			},
+			set config(value) {
+				inventoryViewConfig = value;
+			},
+			get terminalId() {
+				return inventoryViewConfigTerminalId;
+			},
+			set terminalId(value) {
+				inventoryViewConfigTerminalId = value;
+			}
+		},
+		settings: {
+			get open() {
+				return inventorySettingsOpen;
+			},
+			set open(value) {
+				inventorySettingsOpen = value;
+			},
+			get terminalId() {
+				return inventorySettingsTerminalId;
+			},
+			set terminalId(value) {
+				inventorySettingsTerminalId = value;
+			},
+			get terminalName() {
+				return inventorySettingsTerminalName;
+			},
+			set terminalName(value) {
+				inventorySettingsTerminalName = value;
+			},
+			get whitelistText() {
+				return inventorySettingsWhitelistText;
+			},
+			set whitelistText(value) {
+				inventorySettingsWhitelistText = value;
+			},
+			get blacklistText() {
+				return inventorySettingsBlacklistText;
+			},
+			set blacklistText(value) {
+				inventorySettingsBlacklistText = value;
+			},
+			get categories() {
+				return inventorySettingsCategories;
+			},
+			set categories(value) {
+				inventorySettingsCategories = value;
+			},
+			get saving() {
+				return inventorySettingsSaving;
+			},
+			set saving(value) {
+				inventorySettingsSaving = value;
+			},
+			get error() {
+				return inventorySettingsError;
+			},
+			set error(value) {
+				inventorySettingsError = value;
+			}
+		},
+		getCurrentTerminalId: () => terminalId,
+		fetchInventoryViewConfig,
+		saveInventoryViewConfig,
+		showToast,
+		setAuthToken
+	});
+
 	let craftOpen = $state(false);
 	let craftItem = $state<InventoryItem | null>(null);
 	let craftMissingItems = $state<GenericStackDto[]>([]);
@@ -168,18 +241,84 @@
 	let cpuProcessLoading = $state(false);
 	let cpuProcessError = $state<string | null>(null);
 	let cpuProcessData = $state<CpuProcessResponse | null>(null);
-	let cpuProcessTimer: number | null = null;
 
-	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- tooltip cache, not reactive
-	const tooltipCache = new Map<string, string[]>();
+	const cpuProcessController = createCpuProcessController({
+		state: {
+			get open() {
+				return cpuProcessOpen;
+			},
+			set open(value) {
+				cpuProcessOpen = value;
+			},
+
+			get cpuId() {
+				return cpuProcessCpuId;
+			},
+			set cpuId(value) {
+				cpuProcessCpuId = value;
+			},
+
+			get cpuName() {
+				return cpuProcessCpuName;
+			},
+			set cpuName(value) {
+				cpuProcessCpuName = value;
+			},
+
+			get autoRefresh() {
+				return cpuProcessAutoRefresh;
+			},
+			set autoRefresh(value) {
+				cpuProcessAutoRefresh = value;
+			},
+
+			get completionNotified() {
+				return cpuProcessCompletionNotified;
+			},
+			set completionNotified(value) {
+				cpuProcessCompletionNotified = value;
+			},
+
+			get loading() {
+				return cpuProcessLoading;
+			},
+			set loading(value) {
+				cpuProcessLoading = value;
+			},
+
+			get error() {
+				return cpuProcessError;
+			},
+			set error(value) {
+				cpuProcessError = value;
+			},
+
+			get data() {
+				return cpuProcessData;
+			},
+			set data(value) {
+				cpuProcessData = value;
+			}
+		},
+		getTerminalId: () => terminalId,
+		fetchCpuProcess,
+		showToast
+	});
+
 	let tooltipComponent: ItemTooltip;
 	let tooltipVisible = $state(false);
 	let tooltipHtmlLines = $state<string[]>([]);
-	let tooltipHoverKey = $state<string | null>(null);
-	let tooltipPositioner: TooltipPositioner | null = null;
-	let tooltipLastX = 0;
-	let tooltipLastY = 0;
-	let tooltipHasLastPos = false;
+
+	const tooltipController = createTooltipController({
+		getGrid: () => inventoryGridComponent,
+		getTooltip: () => tooltipComponent,
+		setVisible: (visible) => {
+			tooltipVisible = visible;
+		},
+		setHtmlLines: (lines) => {
+			tooltipHtmlLines = lines;
+		}
+	});
 
 	async function flushInventoryState(): Promise<void> {
 		if (document.hidden) return;
@@ -231,17 +370,6 @@
 		searchTerm = searchValue.trim();
 		void recomputeInventory({ preserveAnchor: false });
 	}, 500);
-
-	function displayNameFor(item: InventoryItem): string {
-		const name = item?.name;
-		if (typeof name === 'string' && name.trim()) {
-			return name;
-		}
-		if (item.id.includes(':')) {
-			return item.id.split(':', 2)[1] || item.id;
-		}
-		return item.id;
-	}
 
 	function stopInventoryEventStream(): void {
 		lastInventoryEventVersion = null;
@@ -392,7 +520,7 @@
 				chartViewedItems.clear();
 			} else if (!wasEmpty || currentTerminalId) {
 				// Terminal changed or first connection
-				closeCpuProcessModal();
+				cpuProcessController.closeModal();
 				inventoryItems = [];
 				inventoryState = new Map();
 				visibleItems = [];
@@ -401,114 +529,25 @@
 				chartViewedItems.clear();
 				void loadCpus();
 				startInventoryEventStream();
-				void loadInventoryViewConfigForTerminal(currentTerminalId);
+				void inventoryConfigController.loadForTerminal(currentTerminalId);
 			}
 		}
 	});
 
-	function captureScrollAnchor(): { id: string; topOffset: number } | null {
-		const inventoryScrollEl = inventoryGridComponent?.getScrollElement();
-		const inventoryGridEl = inventoryGridComponent?.getGridElement();
-		if (!inventoryScrollEl || !inventoryGridEl) return null;
-
-		try {
-			const scrollRect = inventoryScrollEl.getBoundingClientRect();
-			const x = scrollRect.left + Math.min(16, scrollRect.width / 2);
-			const y = scrollRect.top + 16;
-			const hit = document.elementFromPoint(x, y) as Element | null;
-			const slot = hit?.closest?.('.item-slot') as HTMLElement | null;
-			if (slot && inventoryGridEl.contains(slot)) {
-				const id = slot.dataset.itemId;
-				if (!id) return null;
-				const rect = slot.getBoundingClientRect();
-				return { id, topOffset: rect.top - scrollRect.top };
-			}
-		} catch {
-			// ignore
-		}
-		return null;
-	}
-
-	function escapeCssAttr(value: string): string {
-		if (window.CSS && typeof window.CSS.escape === 'function') {
-			return window.CSS.escape(value);
-		}
-		return String(value).replace(/["\\]/g, '\\$&');
-	}
-
-	function restoreScrollAnchor(anchor: { id: string; topOffset: number } | null): number {
-		const inventoryScrollEl = inventoryGridComponent?.getScrollElement();
-		const inventoryGridEl = inventoryGridComponent?.getGridElement();
-		if (!anchor?.id || !inventoryScrollEl || !inventoryGridEl) return 0;
-
-		try {
-			const selector = `[data-item-id="${escapeCssAttr(anchor.id)}"]`;
-			const el = inventoryGridEl.querySelector(selector) as HTMLElement | null;
-			if (!el) return 0;
-
-			const scrollRect = inventoryScrollEl.getBoundingClientRect();
-			const rect = el.getBoundingClientRect();
-			const newOffset = rect.top - scrollRect.top;
-			const delta = newOffset - anchor.topOffset;
-			if (Number.isFinite(delta) && Math.abs(delta) > 0.5) {
-				inventoryScrollEl.scrollTop += delta;
-				return delta;
-			}
-		} catch {
-			// ignore
-		}
-		return 0;
-	}
-
 	function computeVisible(items: InventoryItem[]): InventoryItem[] {
-		let out = Array.isArray(items) ? items : [];
-
-		if (filter === 'items') {
-			out = out.filter((item) => item.type === 'item');
-		} else if (filter === 'fluids') {
-			out = out.filter((item) => item.type === 'fluid');
-		}
-
-		if (searchTerm) {
-			out = out.filter((item) => {
-				const name = displayNameFor(item);
-				return matchItem(name, searchTerm) || matchItem(item.id, searchTerm);
-			});
-		}
-
-		return sortInventoryItems(out, sort);
-	}
-
-	function hasPositionChanged(previous: InventoryItem[], next: InventoryItem[]): boolean {
-		if (!Array.isArray(previous) || previous.length === 0) return false;
-		if (!Array.isArray(next) || next.length === 0) return false;
-
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- temp variable in function
-		const prevIndexById = new Map<string, number>();
-		for (let i = 0; i < previous.length; i++) {
-			prevIndexById.set(previous[i].uniqueId, i);
-		}
-
-		for (let i = 0; i < next.length; i++) {
-			const prevIndex = prevIndexById.get(next[i].uniqueId);
-			if (prevIndex != null && prevIndex !== i) {
-				return true;
-			}
-		}
-
-		return false;
+		return computeVisibleItems(items, { filter, searchTerm, sort });
 	}
 
 	async function applyVisibleItems(
 		nextVisible: InventoryItem[],
 		preserveAnchor: boolean
 	): Promise<void> {
-		const anchor = preserveAnchor ? captureScrollAnchor() : null;
+		const anchor = preserveAnchor ? captureScrollAnchor(inventoryGridComponent) : null;
 		visibleItems = nextVisible;
 		await tick();
 
 		if (preserveAnchor) {
-			restoreScrollAnchor(anchor);
+			restoreScrollAnchor(inventoryGridComponent, anchor);
 		}
 	}
 
@@ -545,226 +584,6 @@
 	function selectTerminal(next: TerminalInfo): void {
 		// The reactive block handles page-specific logic when terminalId changes
 		selectTerminalFromStore(next);
-	}
-
-	function normalizeInventoryViewConfig(
-		raw: InventoryViewConfig | null | undefined
-	): InventoryViewConfig {
-		const whitelist = Array.isArray(raw?.whitelist)
-			? raw!.whitelist.filter((x) => typeof x === 'string' && x.trim())
-			: [];
-		const blacklist = Array.isArray(raw?.blacklist)
-			? raw!.blacklist.filter((x) => typeof x === 'string' && x.trim())
-			: [];
-		const categories = Array.isArray(raw?.categories)
-			? raw!.categories
-					.filter(
-						(x) =>
-							x &&
-							typeof x.name === 'string' &&
-							x.name.trim() &&
-							typeof x.tagRegex === 'string' &&
-							x.tagRegex.trim()
-					)
-					.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
-			: [];
-		const collapsed =
-			raw?.collapsed && typeof raw.collapsed === 'object'
-				? { ...(raw.collapsed as Record<string, boolean>) }
-				: {};
-		return { whitelist, blacklist, categories, collapsed };
-	}
-
-	function isUnauthorizedError(e: unknown): boolean {
-		const message = e instanceof Error ? e.message : String(e ?? '');
-		return message.toLowerCase().includes('unauthorized') || message.includes('HTTP 401');
-	}
-
-	async function loadInventoryViewConfigForTerminal(nextTerminalId: string): Promise<void> {
-		if (!nextTerminalId) {
-			inventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
-			inventoryViewConfigTerminalId = null;
-			return;
-		}
-		if (inventoryViewConfigTerminalId === nextTerminalId) {
-			return;
-		}
-
-		try {
-			const cfg = await fetchInventoryViewConfig(nextTerminalId);
-			inventoryViewConfig = normalizeInventoryViewConfig(cfg);
-			inventoryViewConfigTerminalId = nextTerminalId;
-		} catch (e) {
-			if (isUnauthorizedError(e)) {
-				showToast('Invalid token', 'error');
-				setAuthToken('');
-				return;
-			}
-			inventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
-			inventoryViewConfigTerminalId = nextTerminalId;
-		}
-	}
-
-	const saveInventoryViewConfigDebounced = debounce(
-		(targetTerminalId: string, cfg: InventoryViewConfig) => {
-			void (async () => {
-				if (!targetTerminalId) return;
-				try {
-					const saved = await saveInventoryViewConfig(targetTerminalId, cfg);
-					if (terminalId === targetTerminalId) {
-						inventoryViewConfig = normalizeInventoryViewConfig(saved);
-						inventoryViewConfigTerminalId = targetTerminalId;
-					}
-				} catch (e) {
-					if (isUnauthorizedError(e)) {
-						showToast('Invalid token', 'error');
-						setAuthToken('');
-					}
-				}
-			})();
-		},
-		600
-	);
-
-	function toggleInventorySectionCollapsed(key: string): void {
-		if (!key) return;
-		const current = inventoryViewConfig?.collapsed ?? {};
-		const next = { ...current, [key]: !(current[key] === true) };
-		inventoryViewConfig = { ...inventoryViewConfig, collapsed: next };
-		if (terminalId) {
-			saveInventoryViewConfigDebounced(terminalId, inventoryViewConfig);
-		}
-	}
-
-	let inventorySettingsCategoryIdSeq = 0;
-
-	function createInventoryCategoryDraft(rule?: {
-		name?: string;
-		tagRegex?: string;
-	}): CategoryDraft {
-		inventorySettingsCategoryIdSeq += 1;
-		return {
-			id: `cat_${inventorySettingsCategoryIdSeq}`,
-			name: typeof rule?.name === 'string' ? rule.name : '',
-			tagRegex: typeof rule?.tagRegex === 'string' ? rule.tagRegex : ''
-		};
-	}
-
-	async function openInventorySettingsModalForTerminal(terminal: TerminalInfo): Promise<void> {
-		if (!terminal?.id) return;
-		inventorySettingsOpen = true;
-		inventorySettingsTerminalId = terminal.id;
-		inventorySettingsTerminalName = terminal.displayName;
-		inventorySettingsSaving = false;
-		inventorySettingsError = null;
-
-		try {
-			const cfg =
-				terminal.id === inventoryViewConfigTerminalId
-					? inventoryViewConfig
-					: await fetchInventoryViewConfig(terminal.id);
-			const normalized = normalizeInventoryViewConfig(cfg);
-			inventorySettingsWhitelistText = normalized.whitelist.join('\n');
-			inventorySettingsBlacklistText = normalized.blacklist.join('\n');
-			inventorySettingsCategories = normalized.categories.map((x) =>
-				createInventoryCategoryDraft(x)
-			);
-		} catch (e) {
-			if (isUnauthorizedError(e)) {
-				showToast('Invalid token', 'error');
-				setAuthToken('');
-				return;
-			}
-			inventorySettingsWhitelistText = '';
-			inventorySettingsBlacklistText = '';
-			inventorySettingsCategories = [];
-			inventorySettingsError = e instanceof Error ? e.message : 'Failed to load settings';
-		}
-	}
-
-	function closeInventorySettingsModal(): void {
-		inventorySettingsOpen = false;
-		inventorySettingsTerminalId = null;
-		inventorySettingsTerminalName = null;
-		inventorySettingsSaving = false;
-		inventorySettingsError = null;
-	}
-
-	function parseRegexLines(text: string): string[] {
-		return String(text)
-			.split('\n')
-			.map((x) => x.trim())
-			.filter(Boolean);
-	}
-
-	function validateRegex(pattern: string): string | null {
-		try {
-			new RegExp(pattern, 'i');
-			return null;
-		} catch {
-			return `Invalid regex: ${pattern}`;
-		}
-	}
-
-	async function saveInventorySettings(
-		whitelistText: string,
-		blacklistText: string,
-		categories: CategoryDraft[]
-	): Promise<void> {
-		if (!inventorySettingsTerminalId) return;
-		inventorySettingsSaving = true;
-		inventorySettingsError = null;
-
-		const whitelist = parseRegexLines(whitelistText);
-		const blacklist = parseRegexLines(blacklistText);
-		for (const p of [...whitelist, ...blacklist]) {
-			const err = validateRegex(p);
-			if (err) {
-				inventorySettingsError = err;
-				inventorySettingsSaving = false;
-				return;
-			}
-		}
-
-		const cats = categories
-			.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
-			.filter((x) => x.name && x.tagRegex);
-		for (const c of cats) {
-			const err = validateRegex(c.tagRegex);
-			if (err) {
-				inventorySettingsError = err;
-				inventorySettingsSaving = false;
-				return;
-			}
-		}
-
-		const nextCfg: InventoryViewConfig = {
-			whitelist,
-			blacklist,
-			categories: cats,
-			collapsed:
-				inventoryViewConfigTerminalId === inventorySettingsTerminalId
-					? inventoryViewConfig.collapsed
-					: {}
-		};
-
-		try {
-			const saved = await saveInventoryViewConfig(inventorySettingsTerminalId, nextCfg);
-			if (terminalId === inventorySettingsTerminalId) {
-				inventoryViewConfig = normalizeInventoryViewConfig(saved);
-				inventoryViewConfigTerminalId = inventorySettingsTerminalId;
-			}
-			closeInventorySettingsModal();
-		} catch (e) {
-			if (isUnauthorizedError(e)) {
-				showToast('Invalid token', 'error');
-				setAuthToken('');
-				return;
-			}
-			inventorySettingsError = e instanceof Error ? e.message : 'Failed to save settings';
-		} finally {
-			inventorySettingsSaving = false;
-		}
 	}
 
 	function setFilter(next: InventoryFilter): void {
@@ -866,224 +685,6 @@
 		}
 	}
 
-	function openCpuProcessModal(cpu: CpuDto): void {
-		if (!cpu?.busy) return;
-		if (!cpu.cpuId) return;
-		if (!terminalId) return;
-
-		cpuProcessOpen = true;
-		cpuProcessCpuId = cpu.cpuId;
-		cpuProcessCpuName = cpu.name;
-		cpuProcessAutoRefresh = true;
-		cpuProcessCompletionNotified = false;
-		cpuProcessLoading = false;
-		cpuProcessError = null;
-		cpuProcessData = null;
-
-		syncCpuProcessTimer();
-	}
-
-	function closeCpuProcessModal(): void {
-		cpuProcessOpen = false;
-		// Don't clear data here - let close animation complete with existing content
-		// Data will be cleared when opening a new CPU process modal
-		stopCpuProcessTimer();
-	}
-
-	function stopCpuProcessTimer(): void {
-		if (cpuProcessTimer != null) {
-			window.clearInterval(cpuProcessTimer);
-			cpuProcessTimer = null;
-		}
-	}
-
-	function syncCpuProcessTimer(): void {
-		stopCpuProcessTimer();
-
-		if (!cpuProcessOpen) return;
-		void loadCpuProcess();
-
-		if (!cpuProcessAutoRefresh) return;
-		cpuProcessTimer = window.setInterval(() => void loadCpuProcess(), 2000);
-	}
-
-	async function loadCpuProcess(): Promise<void> {
-		if (!cpuProcessOpen) return;
-		if (!terminalId) return;
-		if (!cpuProcessCpuId) return;
-		if (cpuProcessLoading) return;
-
-		cpuProcessLoading = true;
-		try {
-			const data = await fetchCpuProcess(terminalId, cpuProcessCpuId);
-			cpuProcessData = data;
-			cpuProcessCpuName = data?.name ?? cpuProcessCpuName;
-			cpuProcessError = null;
-
-			if (data && data.busy === false) {
-				cpuProcessAutoRefresh = false;
-				stopCpuProcessTimer();
-				if (!cpuProcessCompletionNotified) {
-					const outputName = data?.summary?.finalOutput?.name;
-					showToast(
-						outputName ? `Crafting complete: ${outputName}` : 'Crafting complete',
-						'success'
-					);
-					cpuProcessCompletionNotified = true;
-				}
-			}
-		} catch (e) {
-			const message = e instanceof Error ? e.message : 'Failed to load CPU process';
-			if (message.toLowerCase().includes('not busy')) {
-				cpuProcessAutoRefresh = false;
-				stopCpuProcessTimer();
-				cpuProcessError = null;
-
-				const lastSummary: CpuProcessResponse['summary'] = cpuProcessData?.summary ?? {};
-				const outputTotal = Number(lastSummary.outputTotal ?? 0);
-				const nextSummary =
-					outputTotal > 0
-						? { ...lastSummary, outputDone: outputTotal, outputRemaining: 0 }
-						: lastSummary;
-
-				cpuProcessData = {
-					cpuId: cpuProcessCpuId,
-					busy: false,
-					name: cpuProcessCpuName ?? null,
-					summary: nextSummary,
-					entries: [],
-					patterns: []
-				};
-
-				if (!cpuProcessCompletionNotified) {
-					const outputName = cpuProcessData?.summary?.finalOutput?.name;
-					showToast(
-						outputName ? `Crafting complete: ${outputName}` : 'Crafting complete',
-						'success'
-					);
-					cpuProcessCompletionNotified = true;
-				}
-				return;
-			}
-			cpuProcessError = message;
-		} finally {
-			cpuProcessLoading = false;
-		}
-	}
-
-	function handleCpuProcessAutoRefreshChange(value: boolean): void {
-		cpuProcessAutoRefresh = value;
-		syncCpuProcessTimer();
-	}
-
-	function ensureTooltipPositioner(): TooltipPositioner | null {
-		const tooltipEl = tooltipComponent?.getElement();
-		if (!tooltipEl) return null;
-		if (tooltipPositioner) return tooltipPositioner;
-
-		tooltipPositioner = createTooltipPositioner({
-			requestAnimationFrame: (cb) => window.requestAnimationFrame(cb),
-			cancelAnimationFrame: (id) => window.cancelAnimationFrame(id),
-			getTooltipSize: () => {
-				const rect = tooltipEl?.getBoundingClientRect();
-				return { width: rect?.width ?? 0, height: rect?.height ?? 0 };
-			},
-			getViewportSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
-			applyPosition: (left, top) => {
-				tooltipComponent?.setPosition(left, top);
-			}
-		});
-
-		return tooltipPositioner;
-	}
-
-	function renderTooltip(lines: string[]): void {
-		const normalized = Array.isArray(lines) ? lines.filter(Boolean) : [];
-		if (normalized.length === 0) {
-			tooltipHtmlLines = [legacyTextToHtml('(no tooltip)')];
-		} else {
-			tooltipHtmlLines = normalized.map((line) => legacyTextToHtml(line));
-		}
-
-		tooltipVisible = true;
-		const positioner = ensureTooltipPositioner();
-		positioner?.invalidateSize();
-		if (tooltipHasLastPos) {
-			positioner?.onMouseMove(tooltipLastX, tooltipLastY);
-		}
-	}
-
-	function showTooltipLoading(): void {
-		tooltipHtmlLines = ['Loading...'].map((line) => legacyTextToHtml(line));
-		tooltipVisible = true;
-		const positioner = ensureTooltipPositioner();
-		positioner?.invalidateSize();
-	}
-
-	function hideTooltip(): void {
-		tooltipVisible = false;
-		tooltipPositioner?.cancel();
-	}
-
-	async function requestTooltip(iconKey: string): Promise<void> {
-		if (tooltipCache.has(iconKey)) {
-			if (tooltipHoverKey === iconKey) {
-				renderTooltip(tooltipCache.get(iconKey) ?? []);
-			}
-			return;
-		}
-
-		try {
-			const data = await fetchTooltip(iconKey);
-			const tooltip = Array.isArray(data?.tooltip) ? data.tooltip.filter(Boolean) : [];
-			tooltipCache.set(iconKey, tooltip);
-
-			if (tooltipHoverKey === iconKey) {
-				renderTooltip(tooltip);
-			}
-		} catch {
-			if (tooltipHoverKey === iconKey) {
-				renderTooltip(['(tooltip not prerendered yet)']);
-			}
-		}
-	}
-
-	function onGridMouseOver(e: MouseEvent): void {
-		const target = e.target as Element | null;
-		const slot = target?.closest?.('.item-slot') as HTMLElement | null;
-		const inventoryGridEl = inventoryGridComponent?.getGridElement();
-		if (!slot || !inventoryGridEl?.contains(slot)) return;
-
-		const iconKey = slot.dataset.iconId;
-		if (!iconKey) return;
-
-		tooltipLastX = e.clientX;
-		tooltipLastY = e.clientY;
-		tooltipHasLastPos = true;
-
-		tooltipHoverKey = iconKey;
-		showTooltipLoading();
-		ensureTooltipPositioner()?.onMouseMove(tooltipLastX, tooltipLastY);
-		void requestTooltip(iconKey);
-	}
-
-	function onGridMouseMove(e: MouseEvent): void {
-		if (!tooltipVisible) return;
-		tooltipLastX = e.clientX;
-		tooltipLastY = e.clientY;
-		tooltipHasLastPos = true;
-		ensureTooltipPositioner()?.onMouseMove(tooltipLastX, tooltipLastY);
-	}
-
-	function onGridMouseOut(e: MouseEvent): void {
-		const fromSlot = (e.target as Element | null)?.closest?.('.item-slot');
-		const toSlot = (e.relatedTarget as Element | null)?.closest?.('.item-slot');
-		if (fromSlot && fromSlot === toSlot) return;
-		tooltipHoverKey = null;
-		tooltipHasLastPos = false;
-		hideTooltip();
-	}
-
 	function onSearchKeyUp(e: KeyboardEvent): void {
 		if (e.key === 'Enter') {
 			executeSearchNow();
@@ -1099,8 +700,8 @@
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				closeCraftModal();
-				closeCpuProcessModal();
-				closeInventorySettingsModal();
+				cpuProcessController.closeModal();
+				inventoryConfigController.closeSettingsModal();
 			}
 		};
 
@@ -1108,11 +709,12 @@
 
 		return () => {
 			clearInterval(cpuTimer);
-			stopCpuProcessTimer();
+			cpuProcessController.destroy();
 			document.removeEventListener('keydown', onKeyDown);
 			stopInventoryEventStream();
+			tooltipController.destroy();
 			applySearchDebounced.cancel();
-			saveInventoryViewConfigDebounced.cancel();
+			inventoryConfigController.destroy();
 		};
 	}
 
@@ -1150,7 +752,9 @@
 	});
 
 	onDestroy(() => stopInventoryEventStream());
-	onDestroy(() => stopCpuProcessTimer());
+	onDestroy(() => cpuProcessController.destroy());
+	onDestroy(() => tooltipController.destroy());
+	onDestroy(() => inventoryConfigController.destroy());
 </script>
 
 <!-- Main Container -->
@@ -1203,7 +807,7 @@
 					aria-label="Inventory Settings"
 					onclick={() => {
 						if (terminalId) {
-							void openInventorySettingsModalForTerminal({
+							void inventoryConfigController.openSettingsModalForTerminal({
 								id: terminalId,
 								displayName: terminalDisplayName,
 								connected: true
@@ -1295,10 +899,10 @@
 				renderNodes={inventoryRenderNodes}
 				onItemContextMenu={handleItemContextMenu}
 				onItemClick={openCraftModal}
-				onToggleSection={toggleInventorySectionCollapsed}
-				onMouseOver={onGridMouseOver}
-				onMouseMove={onGridMouseMove}
-				onMouseOut={onGridMouseOut}
+				onToggleSection={inventoryConfigController.toggleSectionCollapsed}
+				onMouseOver={tooltipController.onMouseOver}
+				onMouseMove={tooltipController.onMouseMove}
+				onMouseOut={tooltipController.onMouseOut}
 				onScroll={onInventoryScroll}
 			/>
 		</div>
@@ -1306,7 +910,7 @@
 		<!-- Side Panel -->
 		<CpuSidebar
 			{cpus}
-			onCpuClick={openCpuProcessModal}
+			onCpuClick={cpuProcessController.openModal}
 			onRefresh={() => void refreshData()}
 			onSearch={executeSearchNow}
 			onScrollToTop={() =>
@@ -1327,9 +931,9 @@
 	loading={cpuProcessLoading}
 	error={cpuProcessError}
 	data={cpuProcessData}
-	onClose={closeCpuProcessModal}
-	onRefresh={() => void loadCpuProcess()}
-	onAutoRefreshChange={handleCpuProcessAutoRefreshChange}
+	onClose={cpuProcessController.closeModal}
+	onRefresh={() => void cpuProcessController.refresh()}
+	onAutoRefreshChange={cpuProcessController.setAutoRefresh}
 />
 
 <!-- Inventory Settings Modal -->
@@ -1342,8 +946,8 @@
 	whitelistText={inventorySettingsWhitelistText}
 	blacklistText={inventorySettingsBlacklistText}
 	categories={inventorySettingsCategories}
-	onClose={closeInventorySettingsModal}
-	onSave={saveInventorySettings}
+	onClose={inventoryConfigController.closeSettingsModal}
+	onSave={inventoryConfigController.saveSettings}
 	onWhitelistChange={(v) => (inventorySettingsWhitelistText = v)}
 	onBlacklistChange={(v) => (inventorySettingsBlacklistText = v)}
 	onCategoriesChange={(c) => (inventorySettingsCategories = c)}
