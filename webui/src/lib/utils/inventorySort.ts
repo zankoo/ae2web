@@ -63,4 +63,3 @@ export function sortInventoryItems(items: InventoryItem[], sortKey: string): Inv
 
 	return list;
 }
-

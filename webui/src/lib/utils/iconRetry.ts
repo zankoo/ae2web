@@ -13,7 +13,8 @@ export function nextIconRetry(
 	const limit = Number.isFinite(maxAttempts) && maxAttempts > 0 ? Math.floor(maxAttempts) : 0;
 
 	const currentAttempts = Number(attempts);
-	const safeAttempts = Number.isFinite(currentAttempts) && currentAttempts > 0 ? currentAttempts : 0;
+	const safeAttempts =
+		Number.isFinite(currentAttempts) && currentAttempts > 0 ? currentAttempts : 0;
 
 	if (limit > 0 && safeAttempts >= limit) {
 		return { attempts: limit, delayMs: max };
@@ -24,4 +25,3 @@ export function nextIconRetry(
 	const clampedAttempts = limit > 0 ? Math.min(nextAttempts, limit) : nextAttempts;
 	return { attempts: clampedAttempts, delayMs };
 }
-

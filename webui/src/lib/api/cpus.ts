@@ -12,4 +12,3 @@ export function fetchCpus(terminalId: string): Promise<CpusResponse> {
 	}
 	return apiJson<CpusResponse>(`/api/cpus?${params}`);
 }
-

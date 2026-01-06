@@ -1,6 +1,10 @@
 import { apiJson } from '$lib/api/client';
 import type { InventoryViewConfig } from '$lib/api/types';
-import { isMockEnabled, mockFetchInventoryViewConfig, mockSaveInventoryViewConfig } from '$lib/mock/handlers';
+import {
+	isMockEnabled,
+	mockFetchInventoryViewConfig,
+	mockSaveInventoryViewConfig
+} from '$lib/mock/handlers';
 
 export function fetchInventoryViewConfig(terminalId: string): Promise<InventoryViewConfig> {
 	if (isMockEnabled()) {
@@ -11,7 +15,10 @@ export function fetchInventoryViewConfig(terminalId: string): Promise<InventoryV
 	return apiJson<InventoryViewConfig>(`/api/user/inventoryConfig?${params}`);
 }
 
-export function saveInventoryViewConfig(terminalId: string, config: InventoryViewConfig): Promise<InventoryViewConfig> {
+export function saveInventoryViewConfig(
+	terminalId: string,
+	config: InventoryViewConfig
+): Promise<InventoryViewConfig> {
 	if (isMockEnabled()) {
 		return mockSaveInventoryViewConfig(terminalId, config);
 	}
@@ -22,4 +29,3 @@ export function saveInventoryViewConfig(terminalId: string, config: InventoryVie
 		body: JSON.stringify(config ?? {})
 	});
 }
-

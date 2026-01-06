@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { SvelteMap } from 'svelte/reactivity';
+
 	import type { CpuProcessEntryDto, CpuProcessPatternDto, GenericStackDto } from '$lib/api/types';
 	import CpuDependencyTreeNode from '$lib/components/CpuProcess/CpuDependencyTreeNode.svelte';
 
@@ -16,44 +18,51 @@
 		children: DepNode[];
 	};
 
-	export let root: GenericStackDto | undefined;
-	export let patterns: CpuProcessPatternDto[] = [];
-	export let entries: CpuProcessEntryDto[] = [];
+	let {
+		root = undefined,
+		patterns = [],
+		entries = [],
+		maxDepth = 6,
+		maxNodes = 500,
+		maxPatternsPerOutput = 2,
+		maxChoicesPerInput = 4
+	}: {
+		root?: GenericStackDto;
+		patterns?: CpuProcessPatternDto[];
+		entries?: CpuProcessEntryDto[];
+		maxDepth?: number;
+		maxNodes?: number;
+		maxPatternsPerOutput?: number;
+		maxChoicesPerInput?: number;
+	} = $props();
 
-	export let maxDepth = 6;
-	export let maxNodes = 500;
-	export let maxPatternsPerOutput = 2;
-	export let maxChoicesPerInput = 4;
-
-	let patternsByOutput = new Map<string, CpuProcessPatternDto[]>();
-	let entryByIconKey = new Map<string, Counts>();
-	let tree: DepNode | null = null;
-
-	$: {
-		patternsByOutput = new Map();
+	let patternsByOutput = $derived.by(() => {
+		const map = new SvelteMap<string, CpuProcessPatternDto[]>();
 		for (const p of patterns ?? []) {
 			for (const out of p?.outputs ?? []) {
 				const key = out?.iconKey;
 				if (!key) continue;
-				const list = patternsByOutput.get(key) ?? [];
+				const list = map.get(key) ?? [];
 				list.push(p);
-				patternsByOutput.set(key, list);
+				map.set(key, list);
 			}
 		}
-	}
+		return map;
+	});
 
-	$: {
-		entryByIconKey = new Map();
+	let entryByIconKey = $derived.by(() => {
+		const map = new SvelteMap<string, Counts>();
 		for (const e of entries ?? []) {
 			const key = e?.stack?.iconKey;
 			if (!key) continue;
-			entryByIconKey.set(key, {
+			map.set(key, {
 				stored: Number(e.stored ?? 0),
 				waiting: Number(e.waiting ?? 0),
 				active: Number(e.active ?? 0)
 			});
 		}
-	}
+		return map;
+	});
 
 	function buildTree(): DepNode | null {
 		if (!root?.iconKey) return null;
@@ -81,6 +90,7 @@
 			return { kind: 'stack', id, stack, truncated: true, children: [] };
 		}
 
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- temp variable in build function
 		const nextPath = new Set(path);
 		nextPath.add(stack.iconKey);
 
@@ -112,6 +122,7 @@
 				};
 
 				const choices = Array.isArray(input?.choices) ? input.choices : [];
+				// eslint-disable-next-line svelte/prefer-svelte-reactivity -- temp variable in build function
 				const seen = new Set<string>();
 				for (const choice of choices) {
 					if (!choice?.iconKey) continue;
@@ -137,22 +148,16 @@
 		return { kind: 'stack', id, stack, children };
 	}
 
-	$: tree = buildTree();
+	// Rebuild tree when root, patterns, or entries change
+	let tree = $derived(root && patterns ? buildTree() : null);
 </script>
 
 {#if !tree}
-	<div class="cpu-dep-empty">No dependency data.</div>
+	<div
+		class="text-base-content/60 p-3.5 border border-dashed border-base-300 rounded-xl bg-base-200 font-mono text-center"
+	>
+		No dependency data.
+	</div>
 {:else}
 	<CpuDependencyTreeNode node={tree} depth={0} {entryByIconKey} />
 {/if}
-
-<style>
-	.cpu-dep-empty {
-		color: var(--ae2-text-dim);
-		padding: 14px;
-		border: 1px dashed rgba(255, 255, 255, 0.25);
-		border-radius: 10px;
-		background: rgba(0, 0, 0, 0.15);
-		font-family: var(--font-mono);
-	}
-</style>

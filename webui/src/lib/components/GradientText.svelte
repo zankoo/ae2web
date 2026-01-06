@@ -1,8 +1,13 @@
 <script lang="ts">
-	export let as: string = 'span';
-	export let className: string = '';
+	import type { Snippet } from 'svelte';
+
+	let {
+		as = 'span',
+		className = '',
+		children
+	}: { as?: string; className?: string; children: Snippet } = $props();
 </script>
 
 <svelte:element this={as} class="gradient-text {className}">
-	<slot />
+	{@render children()}
 </svelte:element>

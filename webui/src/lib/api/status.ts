@@ -8,4 +8,3 @@ export function fetchStatus(): Promise<StatusResponse> {
 	}
 	return apiJson<StatusResponse>('/api/status');
 }
-

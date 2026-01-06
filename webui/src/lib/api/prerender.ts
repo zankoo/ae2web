@@ -12,4 +12,3 @@ export function fetchTooltip(iconKey: string): Promise<TooltipResponse> {
 	}
 	return apiJson<TooltipResponse>(`/api/prerender/tooltip?id=${encodeURIComponent(iconKey)}`);
 }
-

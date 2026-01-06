@@ -8,6 +8,7 @@ import com.kokoda.ae2web.web.handlers.ApiHandler;
 import com.kokoda.ae2web.web.dto.InventoryItemDTO;
 import com.kokoda.ae2web.web.inventory.InventoryNameUtils;
 import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
+import com.kokoda.ae2web.web.history.ProductionHistoryService;
 import appeng.api.networking.crafting.ICraftingService;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
@@ -71,7 +72,8 @@ public final class WebServer {
                 return;
             }
 
-            getIoExecutor();
+            ScheduledExecutorService executor = getIoExecutor();
+            ProductionHistoryService.getInstance().start(executor);
 
             int port = AE2WebConfig.getHttpPort();
             String bindAddress = AE2WebConfig.getBindAddress();
@@ -114,6 +116,8 @@ public final class WebServer {
     }
 
     public void stop() {
+        ProductionHistoryService.getInstance().stop();
+
         Channel localServerChannel;
         EventLoopGroup localWorkerGroup;
         EventLoopGroup localBossGroup;
@@ -267,13 +271,11 @@ public final class WebServer {
         Set<Channel> subs = terminalInventorySubscribers.remove(terminalId);
         if (subs != null) {
             for (Channel ch : subs) {
-                if (ch != null) {
-                    ch.eventLoop().execute(() -> {
-                        if (ch.isActive()) {
-                            ch.close();
-                        }
-                    });
-                }
+                ch.eventLoop().execute(() -> {
+                    if (ch.isActive()) {
+                        ch.close();
+                    }
+                });
             }
         }
         terminalInventoryVersions.remove(terminalId);
@@ -362,7 +364,7 @@ public final class WebServer {
         }
 
         for (Channel channel : subs) {
-            if (channel == null || !channel.isActive()) {
+            if (!channel.isActive()) {
                 continue;
             }
             // Writing must occur on the channel's event loop.
@@ -425,9 +427,6 @@ public final class WebServer {
         for (var entry : terminalInventoryStates.entrySet()) {
             String terminalId = entry.getKey();
             TerminalInventoryState state = entry.getValue();
-            if (terminalId == null || terminalId.isBlank() || state == null) {
-                continue;
-            }
 
             synchronized (state.lock) {
                 if (!state.initialized || state.items.isEmpty()) {
@@ -727,6 +726,19 @@ public final class WebServer {
             return;
         }
 
+        // Record history data points
+        long now = System.currentTimeMillis();
+        ProductionHistoryService historyService = ProductionHistoryService.getInstance();
+        for (InventoryItemDTO dto : added) {
+            historyService.recordDataPoint(terminalId, dto.getUniqueId(), dto.getAmount(), now);
+        }
+        for (InventoryPatch patch : updated) {
+            historyService.recordDataPoint(terminalId, patch.getUniqueId(), patch.getAmount(), now);
+        }
+        for (String uniqueId : removed) {
+            historyService.recordDataPoint(terminalId, uniqueId, 0L, now);
+        }
+
         AtomicLong version = terminalInventoryVersions.computeIfAbsent(terminalId, id -> new AtomicLong(0L));
         long newVersion = version.incrementAndGet();
 
@@ -769,7 +781,7 @@ public final class WebServer {
         }
 
         for (Channel channel : subs) {
-            if (channel == null || !channel.isActive()) {
+            if (!channel.isActive()) {
                 continue;
             }
             channel.eventLoop().execute(() -> {

@@ -32,6 +32,8 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL14;
 
 import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -44,7 +46,8 @@ import java.util.List;
  */
 @OnlyIn(Dist.CLIENT)
 public class ItemIconRenderer {
-    private static final int DEFAULT_SIZE = 64;
+    private static final int RENDER_SIZE = 128;  // Render at higher resolution for SSAA
+    private static final int OUTPUT_SIZE = 64;   // Final output size
     private static final int FULL_BRIGHTNESS = 15728880;
 
     private static ItemIconRenderer instance;
@@ -61,7 +64,7 @@ public class ItemIconRenderer {
 
     public static ItemIconRenderer getInstance() {
         if (instance == null) {
-            instance = new ItemIconRenderer(DEFAULT_SIZE);
+            instance = new ItemIconRenderer(RENDER_SIZE);
         }
         return instance;
     }
@@ -209,7 +212,7 @@ public class ItemIconRenderer {
 
     private byte[] convertToPng(NativeImage nativeImage) throws IOException {
         // Convert NativeImage to BufferedImage (with Y flip)
-        BufferedImage bufferedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage fullImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -228,13 +231,22 @@ public class ItemIconRenderer {
                 }
 
                 int argb = (a << 24) | (r << 16) | (g << 8) | b;
-                bufferedImage.setRGB(x, y, argb);
+                fullImage.setRGB(x, y, argb);
             }
         }
 
+        // Downscale with high-quality interpolation for SSAA
+        BufferedImage outputImage = new BufferedImage(OUTPUT_SIZE, OUTPUT_SIZE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = outputImage.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.drawImage(fullImage, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE, null);
+        g2d.dispose();
+
         // Write to PNG
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        ImageIO.write(bufferedImage, "PNG", baos);
+        ImageIO.write(outputImage, "PNG", baos);
         return baos.toByteArray();
     }
 

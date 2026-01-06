@@ -123,11 +123,6 @@ Backend tests use JUnit 5 + Mockito. Frontend tests use Vitest + Testing Library
 cd webui && npm run test          # Frontend tests
 ./gradlew build                   # Runs both (check depends on webuiTest)
 ```
-
-## Task Tracking
-
-Use `docs/TODO.md` for task management with sections: Pending, In Progress, Completed, Blocked.
-
 ## Development Workflow
 
 ### Superpowers 技能系统（强制要求）

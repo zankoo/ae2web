@@ -135,21 +135,26 @@ public final class CpuHandler {
         AEKey key = stack.what();
         String name;
         String translationKey = null;
+        String type;
         if (key instanceof AEItemKey itemKey) {
             translationKey = itemKey.getItem().getDescriptionId();
             name = InventoryNameUtils.getTranslatedName(itemKey, storage);
+            type = "item";
         } else if (key instanceof AEFluidKey fluidKey) {
             translationKey = fluidKey.getFluid().getFluidType().getDescriptionId();
             name = InventoryNameUtils.getFluidName(fluidKey, storage);
+            type = "fluid";
         } else {
             name = InventoryNameUtils.stripMinecraftFormatting(key.getDisplayName().getString());
+            type = "item";
         }
         return Map.of(
                 "id", key.getId().toString(),
                 "iconKey", IconKeyUtils.iconKey(key),
                 "name", name,
                 "translationKey", translationKey != null ? translationKey : "",
-                "amount", stack.amount()
+                "amount", stack.amount(),
+                "type", type
         );
     }
 

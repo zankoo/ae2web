@@ -93,6 +93,30 @@ public final class HandlerUtils {
         return value;
     }
 
+    public static long parseLongParam(Map<String, List<String>> params, String name,
+                                     long defaultValue, long min, long max) {
+        String raw = getFirstParam(params, name);
+        if (raw == null) {
+            return defaultValue;
+        }
+        if (raw.isBlank()) {
+            throw new IllegalArgumentException("Empty value");
+        }
+
+        long value;
+        try {
+            value = Long.parseLong(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid number");
+        }
+
+        if (value < min || value > max) {
+            throw new IllegalArgumentException("Out of range");
+        }
+
+        return value;
+    }
+
     public static void runOnServerThread(ChannelHandlerContext ctx, HttpHeaders headers, Runnable task) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) {
@@ -109,6 +133,10 @@ public final class HandlerUtils {
         if (server != null) {
             server.execute(task);
         }
+    }
+
+    public static void runOnIoThread(ChannelHandlerContext ctx, HttpHeaders headers, Runnable task) {
+        WebServer.getInstance().getIoExecutor().execute(() -> executeSafely(ctx, headers, task));
     }
 
     private static void executeSafely(ChannelHandlerContext ctx, HttpHeaders headers, Runnable task) {

@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-export type ToastType = '' | 'success' | 'error';
+export type ToastType = '' | 'success' | 'error' | 'info';
 
 export type Toast = {
 	id: number;
@@ -23,4 +23,3 @@ export function showToast(message: string, type: ToastType = ''): void {
 		toasts.update((list) => list.filter((t) => t.id !== toast.id));
 	}, 4000);
 }
-

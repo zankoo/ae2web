@@ -1,26 +1,26 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick } from 'svelte';
+	import { resolve } from '$app/paths';
+	import { page } from '$app/stores';
 
 	import debounce from 'lodash-es/debounce';
 
+	import { CraftMissingError } from '$lib/api/client';
 	import { fetchCpus } from '$lib/api/cpus';
 	import { fetchCpuProcess } from '$lib/api/cpuProcess';
 	import { submitCraft } from '$lib/api/craft';
 	import { openInventorySse, type InventoryFilter } from '$lib/api/inventory';
 	import { fetchInventoryViewConfig, saveInventoryViewConfig } from '$lib/api/userConfig';
 	import { fetchTooltip } from '$lib/api/prerender';
-	import { fetchStatus } from '$lib/api/status';
-	import { fetchTerminals } from '$lib/api/terminals';
 	import type {
 		CpuDto,
 		CpuProcessResponse,
+		GenericStackDto,
 		InventoryItem,
 		InventoryViewConfig,
 		TerminalInfo
 	} from '$lib/api/types';
 	import ToastHost from '$lib/components/ToastHost.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import Card from '$lib/components/Card.svelte';
 	import GradientText from '$lib/components/GradientText.svelte';
 	import HeroGraphic from '$lib/components/HeroGraphic.svelte';
 	import LoginModal from '$lib/components/modals/LoginModal.svelte';
@@ -29,6 +29,7 @@
 	import InventorySettingsModal, {
 		type CategoryDraft
 	} from '$lib/components/modals/InventorySettingsModal.svelte';
+	import ProductionChartModal from '$lib/components/modals/ProductionChartModal.svelte';
 	import CpuSidebar from '$lib/components/CpuSidebar.svelte';
 	import TerminalSelector from '$lib/components/TerminalSelector.svelte';
 	import InventoryToolbar, { type SortMode } from '$lib/components/InventoryToolbar.svelte';
@@ -36,88 +37,145 @@
 	import ItemTooltip from '$lib/components/ItemTooltip.svelte';
 	import { authToken, setAuthToken } from '$lib/stores/session';
 	import { showToast } from '$lib/stores/toast';
-	import { formatAmount, formatNumber } from '$lib/utils/format';
 	import {
-		buildInventoryRenderNodes,
-		type InventoryRenderNode
-	} from '$lib/utils/inventoryGrouping';
+		terminalId as terminalIdStore,
+		terminalDisplayName as terminalDisplayNameStore,
+		online as onlineStore,
+		connectedTerminals as connectedTerminalsStore,
+		terminalDropdownOpen as terminalDropdownOpenStore,
+		selectTerminal as selectTerminalFromStore,
+		toggleTerminalDropdown
+	} from '$lib/stores/terminal';
+	import { formatAmount, formatNumber } from '$lib/utils/format';
+	import { buildInventoryRenderNodes } from '$lib/utils/inventoryGrouping';
 	import { sortInventoryItems } from '$lib/utils/inventorySort';
 	import { legacyTextToHtml } from '$lib/utils/minecraftText';
 	import { matchItem } from '$lib/utils/pinyin';
+	import { ProductionStatsTracker } from '$lib/utils/productionStats';
 	import { createTooltipPositioner, type TooltipPositioner } from '$lib/utils/tooltipPositioner';
+	import {
+		loadTerminalHistory,
+		queueHistoryUpdate,
+		forceFlush as forceFlushHistory
+	} from '$lib/storage/productionHistory';
 
-	let online = false;
-	let loginError: string | null = null;
-	$: needsLogin = !$authToken || !$authToken.trim();
+	let loginError = $state<string | null>(null);
+	let needsLogin = $derived(!$authToken || !$authToken.trim());
 	let appCleanup: (() => void) | null = null;
 
-	let terminals: TerminalInfo[] = [];
-	let terminalId = '';
-	let terminalDisplayName = 'Loading...';
-	let terminalDropdownOpen = false;
-	let terminalSelectorComponent: TerminalSelector;
+	// Use global terminal state from store
+	let online = $derived($onlineStore);
+	let terminalId = $derived($terminalIdStore);
+	let terminalDisplayName = $derived($terminalDisplayNameStore);
+	let terminalDropdownOpen = $derived($terminalDropdownOpenStore);
+	let connectedTerminals = $derived($connectedTerminalsStore);
 
-	let filter: InventoryFilter = 'all';
-	let sort: SortMode = 'amount';
-	let searchValue = '';
-	let searchTerm = '';
-	let inventoryItems: InventoryItem[] = [];
-	let visibleItems: InventoryItem[] = [];
-	let totalItemAmount = 0;
-	let typeCount = 0;
-	let connectedTerminals: TerminalInfo[] = [];
-	let cpuCount = 0;
-	let statusText = 'OFFLINE';
+	let filter = $state<InventoryFilter>('all');
+	let sort = $state<SortMode>('amount');
+	let searchValue = $state('');
+	let searchTerm = $state('');
+	let inventoryItems = $state<InventoryItem[]>([]);
+	let visibleItems = $state<InventoryItem[]>([]);
+	let totalItemAmount = $derived(
+		visibleItems.reduce((sum, item) => {
+			const amount = Number(item?.amount);
+			return sum + (Number.isFinite(amount) ? amount : 0);
+		}, 0)
+	);
+	let typeCount = $derived(visibleItems.length);
 
 	let inventoryGridComponent: InventoryGrid;
-	let inventoryEventSource: EventSource | null = null;
+	let inventoryEventSource: ReturnType<typeof openInventorySse> | null = null;
 	let lastInventoryEventVersion: number | null = null;
 
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- rebuilt on SSE updates
 	let inventoryState = new Map<string, InventoryItem>();
 	let inventoryStateDirty = false;
 	let inventoryStateFlushInFlight = false;
 	let inventoryStateFlushPending = false;
 
+	// Production stats tracker instance
+	const productionStats = new ProductionStatsTracker();
+
+	// Track items whose chart was opened (for persistence)
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- simple add-only tracking set
+	const chartViewedItems = new Set<string>();
+
+	// Production rate cache - avoid repeated calculations
+	const RATE_CACHE_TTL = 200; // 200ms
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- cache Map, not reactive
+	const productionRateCache = new Map<string, { rate: number | null; timestamp: number }>();
+
+	/**
+	 * Get production rate for an item with caching.
+	 * @returns rate per second, or null if not available
+	 */
+	function getProductionRate(uniqueId: string): number | null {
+		if (!terminalId) return null;
+
+		const now = Date.now();
+		const cached = productionRateCache.get(uniqueId);
+
+		if (cached && now - cached.timestamp < RATE_CACHE_TTL) {
+			return cached.rate;
+		}
+
+		const rate = productionStats.getRate(terminalId, uniqueId, now);
+		productionRateCache.set(uniqueId, { rate, timestamp: now });
+		return rate;
+	}
+
 	let inventoryScrollActive = false;
 	let inventoryScrollTimer: ReturnType<typeof setTimeout> | null = null;
 
-	let cpus: CpuDto[] = [];
-	let inventoryViewConfig: InventoryViewConfig = {
+	let cpus = $state<CpuDto[]>([]);
+	let inventoryViewConfig = $state<InventoryViewConfig>({
 		whitelist: [],
 		blacklist: [],
 		categories: [],
 		collapsed: {}
-	};
-	let inventoryViewConfigTerminalId: string | null = null;
-	let inventoryRenderNodes: InventoryRenderNode[] = [];
+	});
+	let inventoryViewConfigTerminalId = $state<string | null>(null);
+	let inventoryRenderNodes = $derived(
+		buildInventoryRenderNodes(
+			visibleItems,
+			filter,
+			inventoryViewConfigTerminalId === terminalId ? inventoryViewConfig : null
+		)
+	);
 
-	let inventorySettingsOpen = false;
-	let inventorySettingsTerminalId: string | null = null;
-	let inventorySettingsTerminalName: string | null = null;
-	let inventorySettingsWhitelistText = '';
-	let inventorySettingsBlacklistText = '';
-	let inventorySettingsCategories: CategoryDraft[] = [];
-	let inventorySettingsSaving = false;
-	let inventorySettingsError: string | null = null;
+	let inventorySettingsOpen = $state(false);
+	let inventorySettingsTerminalId = $state<string | null>(null);
+	let inventorySettingsTerminalName = $state<string | null>(null);
+	let inventorySettingsWhitelistText = $state('');
+	let inventorySettingsBlacklistText = $state('');
+	let inventorySettingsCategories = $state<CategoryDraft[]>([]);
+	let inventorySettingsSaving = $state(false);
+	let inventorySettingsError = $state<string | null>(null);
 
-	let craftOpen = false;
-	let craftItem: InventoryItem | null = null;
+	let craftOpen = $state(false);
+	let craftItem = $state<InventoryItem | null>(null);
+	let craftMissingItems = $state<GenericStackDto[]>([]);
 
-	let cpuProcessOpen = false;
-	let cpuProcessCpuId: string | null = null;
-	let cpuProcessCpuName: string | null = null;
-	let cpuProcessAutoRefresh = true;
-	let cpuProcessCompletionNotified = false;
-	let cpuProcessLoading = false;
-	let cpuProcessError: string | null = null;
-	let cpuProcessData: CpuProcessResponse | null = null;
+	let productionChartOpen = $state(false);
+	let productionChartItem = $state<InventoryItem | null>(null);
+
+	let cpuProcessOpen = $state(false);
+	let cpuProcessCpuId = $state<string | null>(null);
+	let cpuProcessCpuName = $state<string | null>(null);
+	let cpuProcessAutoRefresh = $state(true);
+	let cpuProcessCompletionNotified = $state(false);
+	let cpuProcessLoading = $state(false);
+	let cpuProcessError = $state<string | null>(null);
+	let cpuProcessData = $state<CpuProcessResponse | null>(null);
 	let cpuProcessTimer: number | null = null;
 
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- tooltip cache, not reactive
 	const tooltipCache = new Map<string, string[]>();
 	let tooltipComponent: ItemTooltip;
-	let tooltipVisible = false;
-	let tooltipHtmlLines: string[] = [];
-	let tooltipHoverKey: string | null = null;
+	let tooltipVisible = $state(false);
+	let tooltipHtmlLines = $state<string[]>([]);
+	let tooltipHoverKey = $state<string | null>(null);
 	let tooltipPositioner: TooltipPositioner | null = null;
 	let tooltipLastX = 0;
 	let tooltipLastY = 0;
@@ -210,20 +268,49 @@
 
 		inventoryEventSource = openInventorySse(terminalId, {
 			onHello: (msg) => {
-				lastInventoryEventVersion = msg.version ?? null;
+				lastInventoryEventVersion = msg.version;
 			},
 			onSnapshot: (msg) => {
-				if (msg.terminalId && msg.terminalId !== terminalId) return;
+				if (msg.terminalId !== terminalId) return;
 
-				const items = Array.isArray(msg.items) ? msg.items : [];
-				inventoryState = new Map(items.map((item) => [item.uniqueId, item]));
+				inventoryState = new Map(msg.items.map((item) => [item.uniqueId, item]));
 				inventoryStateDirty = true;
-				lastInventoryEventVersion = msg.version ?? lastInventoryEventVersion;
+				lastInventoryEventVersion = msg.version;
+
+				// Clear production stats and cache for this terminal
+				productionStats.clearTerminal(terminalId);
+				productionRateCache.clear();
+
+				// Load persisted history first, then set baselines
+				// This prevents time-travel issues where resetBaseline(now) followed by
+				// recordUpdate(old_timestamp) would corrupt the window point order
+				void loadTerminalHistory(terminalId).then((historyMap) => {
+					const now = Date.now();
+
+					// Load historical points for items that have history
+					for (const [uniqueId, points] of historyMap) {
+						productionStats.loadHistoricalPoints(terminalId, uniqueId, points);
+						chartViewedItems.add(uniqueId);
+					}
+
+					// Set baselines for all current items
+					for (const item of msg.items) {
+						const entry = productionStats.getEntry(terminalId, item.uniqueId);
+						if (!entry) {
+							// No history, create fresh baseline
+							productionStats.resetBaseline(terminalId, item.uniqueId, item.amount, now);
+						} else if (entry.lastPoint.amount !== item.amount) {
+							// Has history but amount changed, record update
+							productionStats.recordUpdate(terminalId, item.uniqueId, item.amount, now);
+						}
+						// If amount is same as history, no action needed
+					}
+				});
+
 				void flushInventoryState();
 			},
 			onDelta: (msg) => {
-				if (msg.terminalId && msg.terminalId !== terminalId) return;
-				if (msg.version == null) return;
+				if (msg.terminalId !== terminalId) return;
 				if (lastInventoryEventVersion == null) return;
 				if (msg.version !== lastInventoryEventVersion + 1) {
 					showToast('Inventory stream out of sync, resyncing...', 'error');
@@ -232,25 +319,42 @@
 				}
 
 				lastInventoryEventVersion = msg.version;
+				const now = Date.now();
 
-				const removed = Array.isArray(msg.removed) ? msg.removed : [];
-				for (const id of removed) {
+				for (const id of msg.removed) {
 					inventoryState.delete(id);
+					// Reset baseline to 0 (removes entry)
+					productionStats.resetBaseline(terminalId, id, 0, now);
 				}
 
-				const added = Array.isArray(msg.added) ? msg.added : [];
-				for (const item of added) {
-					if (!item?.uniqueId) continue;
+				for (const item of msg.added) {
 					inventoryState.set(item.uniqueId, item);
+					// Reset baseline for newly added items (don't count as production spike)
+					productionStats.resetBaseline(terminalId, item.uniqueId, item.amount, now);
 				}
 
-				const updated = Array.isArray(msg.updated) ? msg.updated : [];
-				for (const patch of updated) {
+				for (const patch of msg.updated) {
 					const prev = inventoryState.get(patch.uniqueId);
 					if (!prev) continue;
 
-					const nextName =
-						typeof patch.name === 'string' && patch.name.trim() ? patch.name : prev.name;
+					// Record update for production stats (before changing inventoryState)
+					if (prev.amount !== patch.amount) {
+						productionStats.recordUpdate(terminalId, patch.uniqueId, patch.amount, now);
+
+						// Update cache immediately for this item
+						const newRate = productionStats.getRate(terminalId, patch.uniqueId, now);
+						productionRateCache.set(patch.uniqueId, { rate: newRate, timestamp: now });
+
+						// Persist if this item was viewed in chart
+						if (chartViewedItems.has(patch.uniqueId)) {
+							const points = productionStats.getPoints(terminalId, patch.uniqueId);
+							if (points) {
+								queueHistoryUpdate(terminalId, patch.uniqueId, points);
+							}
+						}
+					}
+
+					const nextName = patch.name ?? prev.name;
 					inventoryState.set(patch.uniqueId, {
 						...prev,
 						amount: patch.amount,
@@ -265,59 +369,42 @@
 		});
 	}
 
-	async function checkConnection(): Promise<void> {
-		try {
-			await fetchStatus();
-			online = true;
-		} catch (e) {
-			online = false;
-			const message = e instanceof Error ? e.message : '';
-			if (message.toLowerCase().includes('unauthorized') || message.includes('HTTP 401')) {
-				showToast('Invalid token', 'error');
-				setAuthToken('');
-			}
-		}
-	}
+	// Track previous terminal ID to detect changes
+	let previousTerminalId = '';
 
-	function getConnectedTerminals(list: TerminalInfo[]): TerminalInfo[] {
-		return list.filter((t) => t.connected);
-	}
+	// React to terminal changes from the global store
+	// Use $terminalIdStore directly to ensure proper reactivity
+	$effect(() => {
+		const currentTerminalId = $terminalIdStore;
+		if (currentTerminalId !== previousTerminalId) {
+			const wasEmpty = !previousTerminalId;
+			previousTerminalId = currentTerminalId;
 
-	async function loadTerminalsPoll(): Promise<void> {
-		try {
-			const data = await fetchTerminals();
-			terminals = Array.isArray(data.terminals) ? data.terminals : [];
-
-			const connected = getConnectedTerminals(terminals);
-			if (connected.length === 0) {
-				terminalDisplayName = terminals.length === 0 ? 'No terminals' : 'No connected terminals';
-				if (terminalId) {
-					terminalId = '';
-					stopInventoryEventStream();
-				}
+			if (!currentTerminalId) {
+				// Terminal disconnected
+				stopInventoryEventStream();
 				inventoryItems = [];
 				inventoryState = new Map();
 				visibleItems = [];
 				cpus = [];
-				return;
-			}
-
-			const previous = terminalId;
-			const stillConnected = previous && connected.some((t) => t.id === previous);
-			const effective = stillConnected ? connected.find((t) => t.id === previous)! : connected[0];
-
-			terminalId = effective.id;
-			terminalDisplayName = effective.displayName;
-
-			if (terminalId !== previous) {
-				await loadCpus();
+				productionStats.clearAll();
+				productionRateCache.clear();
+				chartViewedItems.clear();
+			} else if (!wasEmpty || currentTerminalId) {
+				// Terminal changed or first connection
+				closeCpuProcessModal();
+				inventoryItems = [];
+				inventoryState = new Map();
+				visibleItems = [];
+				productionStats.clearAll();
+				productionRateCache.clear();
+				chartViewedItems.clear();
+				void loadCpus();
 				startInventoryEventStream();
-				await loadInventoryViewConfigForTerminal(terminalId);
+				void loadInventoryViewConfigForTerminal(currentTerminalId);
 			}
-		} catch (e) {
-			console.error('Failed to load terminals', e);
 		}
-	}
+	});
 
 	function captureScrollAnchor(): { id: string; topOffset: number } | null {
 		const inventoryScrollEl = inventoryGridComponent?.getScrollElement();
@@ -396,6 +483,7 @@
 		if (!Array.isArray(previous) || previous.length === 0) return false;
 		if (!Array.isArray(next) || next.length === 0) return false;
 
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- temp variable in function
 		const prevIndexById = new Map<string, number>();
 		for (let i = 0; i < previous.length; i++) {
 			prevIndexById.set(previous[i].uniqueId, i);
@@ -446,30 +534,17 @@
 		}
 	}
 
-	async function refreshData(): Promise<void> {
-		await checkConnection();
+	function refreshData(): void {
 		startInventoryEventStream();
 	}
 
 	function openTerminalDropdown(): void {
-		terminalDropdownOpen = !terminalDropdownOpen;
+		toggleTerminalDropdown();
 	}
 
 	function selectTerminal(next: TerminalInfo): void {
-		const previous = terminalId;
-		terminalId = next.id;
-		terminalDisplayName = next.displayName;
-		terminalDropdownOpen = false;
-
-		if (terminalId !== previous) {
-			closeCpuProcessModal();
-			inventoryItems = [];
-			inventoryState = new Map();
-			visibleItems = [];
-			void loadCpus();
-			startInventoryEventStream();
-			void loadInventoryViewConfigForTerminal(terminalId);
-		}
+		// The reactive block handles page-specific logic when terminalId changes
+		selectTerminalFromStore(next);
 	}
 
 	function normalizeInventoryViewConfig(
@@ -726,11 +801,43 @@
 
 	function openCraftModal(item: InventoryItem): void {
 		craftItem = item;
+		craftMissingItems = [];
 		craftOpen = true;
 	}
 
 	function closeCraftModal(): void {
 		craftOpen = false;
+	}
+
+	function openProductionChartModal(item: InventoryItem): void {
+		productionChartItem = item;
+		productionChartOpen = true;
+		// Mark item as viewed for persistence
+		chartViewedItems.add(item.uniqueId);
+	}
+
+	function closeProductionChartModal(): void {
+		productionChartOpen = false;
+		productionChartItem = null;
+	}
+
+	/**
+	 * Handle right-click on inventory item to show production chart.
+	 */
+	function handleItemContextMenu(item: InventoryItem, _event: MouseEvent): void {
+		openProductionChartModal(item);
+	}
+
+	/**
+	 * Get production points for an item (for chart).
+	 */
+	function getProductionPoints(uniqueId: string) {
+		if (!terminalId) return null;
+		return productionStats.getPoints(terminalId, uniqueId);
+	}
+
+	function handleCraftRetry(): void {
+		craftMissingItems = [];
 	}
 
 	async function handleCraft(item: InventoryItem, amount: number, cpuName: string): Promise<void> {
@@ -751,7 +858,11 @@
 			closeCraftModal();
 			void loadCpus();
 		} catch (e) {
-			showToast(e instanceof Error ? e.message : 'Craft request failed', 'error');
+			if (e instanceof CraftMissingError) {
+				craftMissingItems = e.missing;
+			} else {
+				showToast(e instanceof Error ? e.message : 'Craft request failed', 'error');
+			}
 		}
 	}
 
@@ -774,10 +885,8 @@
 
 	function closeCpuProcessModal(): void {
 		cpuProcessOpen = false;
-		cpuProcessCpuId = null;
-		cpuProcessCpuName = null;
-		cpuProcessError = null;
-		cpuProcessData = null;
+		// Don't clear data here - let close animation complete with existing content
+		// Data will be cleared when opening a new CPU process modal
 		stopCpuProcessTimer();
 	}
 
@@ -982,41 +1091,24 @@
 	}
 
 	function startApp(): () => void {
-		void loadTerminalsPoll();
-		void checkConnection();
+		// Terminal polling is handled globally in +layout.svelte
 		void loadCpus();
 
-		const statusTimer = window.setInterval(() => void checkConnection(), 5000);
-		const terminalsTimer = window.setInterval(() => void loadTerminalsPoll(), 10000);
 		const cpuTimer = window.setInterval(() => void loadCpus(), 2000);
-
-		const onDocClick = (e: MouseEvent) => {
-			if (!terminalDropdownOpen) return;
-			const target = e.target as Node | null;
-			const containerEl = terminalSelectorComponent?.getContainerElement();
-			if (containerEl && target && !containerEl.contains(target)) {
-				terminalDropdownOpen = false;
-			}
-		};
 
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				closeCraftModal();
 				closeCpuProcessModal();
 				closeInventorySettingsModal();
-				terminalDropdownOpen = false;
 			}
 		};
 
-		document.addEventListener('click', onDocClick);
 		document.addEventListener('keydown', onKeyDown);
 
 		return () => {
-			clearInterval(statusTimer);
-			clearInterval(terminalsTimer);
 			clearInterval(cpuTimer);
 			stopCpuProcessTimer();
-			document.removeEventListener('click', onDocClick);
 			document.removeEventListener('keydown', onKeyDown);
 			stopInventoryEventStream();
 			applySearchDebounced.cancel();
@@ -1040,8 +1132,16 @@
 			}
 		});
 
+		// Force flush history on page unload
+		const handleBeforeUnload = () => {
+			forceFlushHistory();
+		};
+		window.addEventListener('beforeunload', handleBeforeUnload);
+
 		return () => {
 			unsubscribe();
+			window.removeEventListener('beforeunload', handleBeforeUnload);
+			forceFlushHistory();
 			if (appCleanup) {
 				appCleanup();
 				appCleanup = null;
@@ -1051,21 +1151,6 @@
 
 	onDestroy(() => stopInventoryEventStream());
 	onDestroy(() => stopCpuProcessTimer());
-
-	$: totalItemAmount = visibleItems.reduce((sum, item) => {
-		const amount = Number(item?.amount);
-		return sum + (Number.isFinite(amount) ? amount : 0);
-	}, 0);
-
-	$: typeCount = visibleItems.length;
-	$: connectedTerminals = getConnectedTerminals(terminals);
-	$: cpuCount = cpus.length;
-	$: statusText = online ? 'ONLINE' : 'OFFLINE';
-	$: inventoryRenderNodes = buildInventoryRenderNodes(
-		visibleItems,
-		filter,
-		inventoryViewConfigTerminalId === terminalId ? inventoryViewConfig : null
-	);
 </script>
 
 <!-- Main Container -->
@@ -1090,12 +1175,7 @@
 					<div
 						class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-accent-secondary flex items-center justify-center shadow-lg shadow-accent/20"
 					>
-						<img
-							src="logo.svg"
-							alt="AE2"
-							class="w-6 h-6"
-							style="image-rendering: pixelated;"
-						/>
+						<img src="logo.svg" alt="AE2" class="w-6 h-6" style="image-rendering: pixelated;" />
 					</div>
 					<h1 class="text-2xl md:text-3xl font-display font-normal tracking-tight text-foreground">
 						AE2 <GradientText>Web</GradientText>
@@ -1104,9 +1184,26 @@
 
 				<div class="w-px h-8 bg-border/50"></div>
 
+				<!-- Navigation Tabs -->
+				<div class="tabs tabs-boxed bg-muted/50 p-1">
+					<a
+						href={resolve('/')}
+						class="tab tab-sm {$page.url.pathname === '/' ? 'tab-active' : ''}"
+					>
+						Inventory
+					</a>
+					<a
+						href={resolve('/dashboard')}
+						class="tab tab-sm {$page.url.pathname === '/dashboard' ? 'tab-active' : ''}"
+					>
+						Dashboard
+					</a>
+				</div>
+
+				<div class="w-px h-8 bg-border/50"></div>
+
 				<!-- Terminal Selector -->
 				<TerminalSelector
-					bind:this={terminalSelectorComponent}
 					{online}
 					displayName={terminalDisplayName}
 					{terminalId}
@@ -1117,13 +1214,12 @@
 				/>
 
 				<!-- Settings -->
-				<Button
-					variant="ghost"
-					size="sm"
-					className="btn-square rounded-full"
+				<button
+					type="button"
+					class="btn btn-ghost btn-sm btn-square rounded-full"
 					title="Inventory Settings"
 					aria-label="Inventory Settings"
-					onClick={() => {
+					onclick={() => {
 						if (terminalId) {
 							void openInventorySettingsModalForTerminal({
 								id: terminalId,
@@ -1145,25 +1241,30 @@
 							d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
 						></path></svg
 					>
-				</Button>
+				</button>
 			</div>
 
 			<!-- Right: Stats -->
 			<div
-				class="hidden md:flex items-center gap-6 px-6 py-2 bg-muted/50 rounded-full border border-border/50"
+				class="stats stats-horizontal hidden md:inline-grid bg-muted/50 border border-border/50 rounded-full"
 			>
-				<div class="flex flex-col items-center">
-					<span class="text-[10px] uppercase tracking-widest text-muted-foreground font-bold"
-						>Items</span
+				<div class="stat place-items-center py-2 px-6">
+					<div
+						class="stat-title text-[10px] uppercase tracking-widest text-muted-foreground font-bold"
 					>
-					<span class="font-mono text-sm font-semibold">{formatAmount(totalItemAmount)}</span>
+						Items
+					</div>
+					<div class="stat-value font-mono text-sm font-semibold">
+						{formatAmount(totalItemAmount)}
+					</div>
 				</div>
-				<div class="w-px h-6 bg-border"></div>
-				<div class="flex flex-col items-center">
-					<span class="text-[10px] uppercase tracking-widest text-muted-foreground font-bold"
-						>Types</span
+				<div class="stat place-items-center py-2 px-6">
+					<div
+						class="stat-title text-[10px] uppercase tracking-widest text-muted-foreground font-bold"
 					>
-					<span class="font-mono text-sm font-semibold">{formatNumber(typeCount)}</span>
+						Types
+					</div>
+					<div class="stat-value font-mono text-sm font-semibold">{formatNumber(typeCount)}</div>
 				</div>
 			</div>
 		</div>
@@ -1172,7 +1273,9 @@
 	<!-- Main Content -->
 	<div class="flex flex-1 overflow-hidden px-4 lg:px-6 pb-4 lg:pb-6 gap-6 z-0">
 		<!-- Inventory Panel -->
-		<Card className="flex-1 flex flex-col overflow-hidden shadow-xl border-border/50" padding="none">
+		<div
+			class="card bg-card border border-border/50 rounded-xl flex-1 flex flex-col overflow-hidden shadow-xl"
+		>
 			<InventoryToolbar
 				{filter}
 				{sort}
@@ -1190,6 +1293,7 @@
 			<InventoryGrid
 				bind:this={inventoryGridComponent}
 				renderNodes={inventoryRenderNodes}
+				onItemContextMenu={handleItemContextMenu}
 				onItemClick={openCraftModal}
 				onToggleSection={toggleInventorySectionCollapsed}
 				onMouseOver={onGridMouseOver}
@@ -1197,7 +1301,7 @@
 				onMouseOut={onGridMouseOut}
 				onScroll={onInventoryScroll}
 			/>
-		</Card>
+		</div>
 
 		<!-- Side Panel -->
 		<CpuSidebar
@@ -1250,8 +1354,19 @@
 	open={craftOpen}
 	item={craftItem}
 	{cpus}
+	missingItems={craftMissingItems}
 	onCraft={handleCraft}
+	onRetry={handleCraftRetry}
 	onClose={closeCraftModal}
+/>
+
+<!-- Production Chart Modal -->
+<ProductionChartModal
+	open={productionChartOpen}
+	item={productionChartItem}
+	getPoints={getProductionPoints}
+	getRate={getProductionRate}
+	onClose={closeProductionChartModal}
 />
 
 <!-- Login Modal -->

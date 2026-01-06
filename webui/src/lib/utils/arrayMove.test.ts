@@ -16,4 +16,3 @@ describe('arrayMove', () => {
 		expect(arrayMove(['a', 'b'], 0, 2)).toEqual(['a', 'b']);
 	});
 });
-

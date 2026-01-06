@@ -1,16 +1,25 @@
 <script lang="ts">
 	import type { TerminalInfo } from '$lib/api/types';
-	import Button from '$lib/components/Button.svelte';
 
-	export let online: boolean = false;
-	export let displayName: string = 'Loading...';
-	export let terminalId: string = '';
-	export let connectedTerminals: TerminalInfo[] = [];
-	export let dropdownOpen: boolean = false;
-	export let onToggleDropdown: () => void;
-	export let onSelectTerminal: (terminal: TerminalInfo) => void;
+	let {
+		online = false,
+		displayName = 'Loading...',
+		terminalId = '',
+		connectedTerminals = [],
+		dropdownOpen = false,
+		onToggleDropdown,
+		onSelectTerminal
+	}: {
+		online?: boolean;
+		displayName?: string;
+		terminalId?: string;
+		connectedTerminals?: TerminalInfo[];
+		dropdownOpen?: boolean;
+		onToggleDropdown: () => void;
+		onSelectTerminal: (terminal: TerminalInfo) => void;
+	} = $props();
 
-	let containerEl: HTMLDivElement | null = null;
+	let containerEl: HTMLDivElement | null = $state(null);
 
 	export function getContainerElement(): HTMLDivElement | null {
 		return containerEl;
@@ -18,11 +27,11 @@
 </script>
 
 <div class="dropdown dropdown-end" bind:this={containerEl}>
-	<Button variant="outline" size="sm" className="gap-2 font-mono" onClick={onToggleDropdown}>
+	<button type="button" class="btn btn-outline btn-sm gap-2 font-sans" onclick={onToggleDropdown}>
 		<span
-			class="w-2 h-2 rounded-full {online
-				? 'bg-success shadow-[0_0_8px_var(--color-success)]'
-				: 'bg-error'}"
+			class="status status-sm {online
+				? 'status-success shadow-[0_0_8px_var(--color-success)]'
+				: 'status-error'}"
 		></span>
 		{displayName}
 		<svg
@@ -32,7 +41,7 @@
 			stroke="currentColor"
 			stroke-width="2"><polyline points="6 9 12 15 18 9" /></svg
 		>
-	</Button>
+	</button>
 
 	{#if dropdownOpen}
 		<ul
@@ -44,10 +53,10 @@
 				{#each connectedTerminals as t (t.id)}
 					<li>
 						<button
-							class="font-mono text-sm rounded-lg hover:bg-muted {t.id === terminalId
+							class="font-sans text-sm rounded-lg hover:bg-muted {t.id === terminalId
 								? 'bg-muted text-accent font-bold'
 								: ''}"
-							on:click={() => onSelectTerminal(t)}
+							onclick={() => onSelectTerminal(t)}
 						>
 							{t.displayName}
 						</button>

@@ -1,8 +1,13 @@
 <script lang="ts">
-	export let visible: boolean = false;
-	export let htmlLines: string[] = [];
+	let {
+		visible = false,
+		htmlLines = []
+	}: {
+		visible?: boolean;
+		htmlLines?: string[];
+	} = $props();
 
-	let tooltipEl: HTMLDivElement | null = null;
+	let tooltipEl: HTMLDivElement | null = $state(null);
 
 	export function getElement(): HTMLDivElement | null {
 		return tooltipEl;
@@ -17,6 +22,7 @@
 
 <div class="ae2web-tooltip" style:display={visible ? 'block' : 'none'} bind:this={tooltipEl}>
 	{#each htmlLines as line, i (i)}
+		<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized Minecraft text from server -->
 		<div>{@html line}</div>
 	{/each}
 </div>

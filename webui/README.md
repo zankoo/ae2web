@@ -11,13 +11,13 @@ The Minecraft mod packages the built static site into the JAR under classpath `w
 
 ## Dev Workflow
 
-1) Start the mod (Netty backend):
+1. Start the mod (Netty backend):
 
 ```bash
 ./gradlew runClient
 ```
 
-2) Start Vite dev server (with `/api` proxy to the mod backend):
+2. Start Vite dev server (with `/api` proxy to the mod backend):
 
 ```bash
 npm -C webui ci

@@ -408,6 +408,44 @@ export const mockInventoryItems: InventoryItem[] = [
 		amount: 8192,
 		craftable: false,
 		tags: ['forge:dusts/glowstone']
+	},
+
+	// Material Shortage Test Items
+	{
+		type: 'item',
+		id: 'test:shortage_basic',
+		uniqueId: 'test:shortage_basic',
+		iconKey: 'minecraft:barrier',
+		name: 'Shortage Test: Basic (1 missing)',
+		translationKey: 'item.test.shortage_basic',
+		namespace: 'test',
+		amount: 1,
+		craftable: true,
+		tags: ['test:material_shortage']
+	},
+	{
+		type: 'item',
+		id: 'test:shortage_multiple',
+		uniqueId: 'test:shortage_multiple',
+		iconKey: 'minecraft:barrier',
+		name: 'Shortage Test: Multiple (5 missing)',
+		translationKey: 'item.test.shortage_multiple',
+		namespace: 'test',
+		amount: 1,
+		craftable: true,
+		tags: ['test:material_shortage']
+	},
+	{
+		type: 'item',
+		id: 'test:shortage_many',
+		uniqueId: 'test:shortage_many',
+		iconKey: 'minecraft:barrier',
+		name: 'Shortage Test: Many (10+ missing)',
+		translationKey: 'item.test.shortage_many',
+		namespace: 'test',
+		amount: 1,
+		craftable: true,
+		tags: ['test:material_shortage']
 	}
 ];
 
@@ -754,6 +792,7 @@ export const mockUserConfig: InventoryViewConfig = {
 	whitelist: [],
 	blacklist: [],
 	categories: [
+		{ name: 'Material Shortage Test', tagRegex: 'test:material_shortage' },
 		{ name: 'Ores', tagRegex: 'forge:ores' },
 		{ name: 'Ingots', tagRegex: 'forge:ingots' },
 		{ name: 'Gems', tagRegex: 'forge:gems' },

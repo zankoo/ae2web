@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import type { InventoryItem, InventoryViewConfig } from '$lib/api/types';
-import type { InventoryFilter } from '$lib/api/inventory';
 import { buildInventoryRenderNodes } from '$lib/utils/inventoryGrouping';
 
 function item(id: string, tags: string[] = []): InventoryItem {
@@ -46,7 +45,11 @@ function cfg(partial: Partial<InventoryViewConfig> = {}): InventoryViewConfig {
 describe('inventoryGrouping', () => {
 	it('does not apply grouping in fluids view', () => {
 		const items = [item('minecraft:stone', ['forge:ores/iron']), fluid('minecraft:water')];
-		const nodes = buildInventoryRenderNodes(items, 'fluids', cfg({ categories: [{ name: 'Ores', tagRegex: '^forge:ores/' }] }));
+		const nodes = buildInventoryRenderNodes(
+			items,
+			'fluids',
+			cfg({ categories: [{ name: 'Ores', tagRegex: '^forge:ores/' }] })
+		);
 
 		expect(nodes.some((n) => n.kind === 'header')).toBe(false);
 		expect(nodes.filter((n) => n.kind === 'item').map((n: any) => n.item.type)).toEqual(['fluid']);
@@ -98,7 +101,11 @@ describe('inventoryGrouping', () => {
 
 	it('includes a Fluids section in All view when tag filter is inactive', () => {
 		const items = [item('minecraft:stone', []), fluid('minecraft:water')];
-		const nodes = buildInventoryRenderNodes(items, 'all', cfg({ categories: [{ name: 'Stuff', tagRegex: '.*' }] }));
+		const nodes = buildInventoryRenderNodes(
+			items,
+			'all',
+			cfg({ categories: [{ name: 'Stuff', tagRegex: '.*' }] })
+		);
 		const headers = nodes.filter((n) => n.kind === 'header').map((n: any) => n.title);
 		expect(headers).toContain('Fluids');
 	});
@@ -106,26 +113,42 @@ describe('inventoryGrouping', () => {
 	it('hides fluids in All view when whitelist is active (fluids have no tags)', () => {
 		const items = [item('minecraft:stone', ['forge:ores/iron']), fluid('minecraft:water')];
 		const nodes = buildInventoryRenderNodes(items, 'all', cfg({ whitelist: ['^forge:ores/'] }));
-		const fluidItems = nodes.filter((n) => n.kind === 'item').map((n: any) => n.item).filter((x: any) => x.type === 'fluid');
+		const fluidItems = nodes
+			.filter((n) => n.kind === 'item')
+			.map((n: any) => n.item)
+			.filter((x: any) => x.type === 'fluid');
 		expect(fluidItems).toHaveLength(0);
 	});
 
 	it('shows fluids in All view when only blacklist is active', () => {
 		const items = [item('minecraft:stone', ['forge:ores/iron']), fluid('minecraft:water')];
 		const nodes = buildInventoryRenderNodes(items, 'all', cfg({ blacklist: ['^forge:ores/'] }));
-		const fluidItems = nodes.filter((n) => n.kind === 'item').map((n: any) => n.item).filter((x: any) => x.type === 'fluid');
+		const fluidItems = nodes
+			.filter((n) => n.kind === 'item')
+			.map((n: any) => n.item)
+			.filter((x: any) => x.type === 'fluid');
 		expect(fluidItems).toHaveLength(1);
 	});
 
 	it('applies whitelist/blacklist to items by tag', () => {
-		const items = [item('mod:copper_ore', ['forge:ores/copper']), item('mod:iron_ore', ['forge:ores/iron'])];
-		const nodes = buildInventoryRenderNodes(items, 'items', cfg({ whitelist: ['^forge:ores/'], blacklist: ['copper'] }));
+		const items = [
+			item('mod:copper_ore', ['forge:ores/copper']),
+			item('mod:iron_ore', ['forge:ores/iron'])
+		];
+		const nodes = buildInventoryRenderNodes(
+			items,
+			'items',
+			cfg({ whitelist: ['^forge:ores/'], blacklist: ['copper'] })
+		);
 		const renderedIds = nodes.filter((n) => n.kind === 'item').map((n: any) => n.item.id);
 		expect(renderedIds).toEqual(['mod:iron_ore']);
 	});
 
 	it('does not hide items with no tags when only blacklist is set', () => {
-		const items = [item('minecraft:lily_pad', []), item('minecraft:iron_ingot', ['forge:ingots/iron'])];
+		const items = [
+			item('minecraft:lily_pad', []),
+			item('minecraft:iron_ingot', ['forge:ingots/iron'])
+		];
 		const nodes = buildInventoryRenderNodes(items, 'items', cfg({ blacklist: ['forge:ingots'] }));
 		const renderedIds = nodes.filter((n) => n.kind === 'item').map((n: any) => n.item.id);
 		expect(renderedIds).toEqual(['minecraft:lily_pad']);

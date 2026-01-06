@@ -40,7 +40,10 @@ function compileRegexList(patterns: string[]): RegExp[] {
 
 function isTagFilterActive(config: InventoryViewConfig | null): boolean {
 	if (!config) return false;
-	return (Array.isArray(config.whitelist) && config.whitelist.length > 0) || (Array.isArray(config.blacklist) && config.blacklist.length > 0);
+	return (
+		(Array.isArray(config.whitelist) && config.whitelist.length > 0) ||
+		(Array.isArray(config.blacklist) && config.blacklist.length > 0)
+	);
 }
 
 function passesTagFilter(item: InventoryItem, whitelist: RegExp[], blacklist: RegExp[]): boolean {
@@ -92,7 +95,9 @@ export function buildInventoryRenderNodes(
 		}
 	}
 
-	const hasCategories = Boolean(config && Array.isArray(config.categories) && config.categories.length > 0);
+	const hasCategories = Boolean(
+		config && Array.isArray(config.categories) && config.categories.length > 0
+	);
 	if (!hasCategories || view === 'fluids') {
 		return visible.map((x) => ({ kind: 'item', key: x.uniqueId, item: x }));
 	}
@@ -141,7 +146,13 @@ export function buildInventoryRenderNodes(
 		const bucket = grouped[key] ?? [];
 
 		const isCollapsed = collapsed[key] === true;
-		nodes.push({ kind: 'header', key, title: entry.name, count: bucket.length, collapsed: isCollapsed });
+		nodes.push({
+			kind: 'header',
+			key,
+			title: entry.name,
+			count: bucket.length,
+			collapsed: isCollapsed
+		});
 		if (!isCollapsed) {
 			for (const it of bucket) {
 				nodes.push({ kind: 'item', key: it.uniqueId, item: it });
@@ -153,7 +164,13 @@ export function buildInventoryRenderNodes(
 	if (otherBucket.length > 0) {
 		const key = 'Other';
 		const isCollapsed = collapsed[key] === true;
-		nodes.push({ kind: 'header', key, title: titles[key] ?? 'Other', count: otherBucket.length, collapsed: isCollapsed });
+		nodes.push({
+			kind: 'header',
+			key,
+			title: titles[key] ?? 'Other',
+			count: otherBucket.length,
+			collapsed: isCollapsed
+		});
 		if (!isCollapsed) {
 			for (const it of otherBucket) {
 				nodes.push({ kind: 'item', key: it.uniqueId, item: it });
@@ -164,7 +181,13 @@ export function buildInventoryRenderNodes(
 	if (view === 'all' && fluidsOnly.length > 0) {
 		const key = 'Fluids';
 		const isCollapsed = collapsed[key] === true;
-		nodes.push({ kind: 'header', key, title: 'Fluids', count: fluidsOnly.length, collapsed: isCollapsed });
+		nodes.push({
+			kind: 'header',
+			key,
+			title: 'Fluids',
+			count: fluidsOnly.length,
+			collapsed: isCollapsed
+		});
 		if (!isCollapsed) {
 			for (const it of fluidsOnly) {
 				nodes.push({ kind: 'item', key: it.uniqueId, item: it });

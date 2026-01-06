@@ -8,4 +8,3 @@ export function fetchTerminals(): Promise<TerminalsResponse> {
 	}
 	return apiJson<TerminalsResponse>('/api/terminals');
 }
-

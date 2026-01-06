@@ -13,4 +13,3 @@ export function arrayMove<T>(items: T[], fromIndex: number, toIndex: number): T[
 	copy.splice(to, 0, moved as T);
 	return copy;
 }
-

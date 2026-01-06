@@ -19,4 +19,3 @@ describe('formatFluidAmount', () => {
 		expect(fn?.(1_000_000)).toBe('1KB');
 	});
 });
-

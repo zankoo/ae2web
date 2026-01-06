@@ -4,11 +4,10 @@ import { isMockEnabled, mockSubmitCraft } from '$lib/mock/handlers';
 
 export function submitCraft(request: CraftRequest): Promise<CraftOkResponse> {
 	if (isMockEnabled()) {
-		return mockSubmitCraft();
+		return mockSubmitCraft(request);
 	}
 	return apiJson<CraftOkResponse>('/api/craft', {
 		method: 'POST',
 		body: JSON.stringify(request)
 	});
 }
-

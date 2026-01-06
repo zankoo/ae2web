@@ -59,6 +59,7 @@ export type GenericStackDto = {
 	name: string;
 	translationKey: string;
 	amount: number;
+	type?: 'item' | 'fluid';
 };
 
 export type CpuJobStatusDto = {
@@ -144,4 +145,50 @@ export type CpuProcessResponse = {
 	summary: CpuProcessSummaryDto;
 	entries: CpuProcessEntryDto[];
 	patterns: CpuProcessPatternDto[];
+};
+
+// Dashboard Widget Types
+
+export type WidgetType = 'network-overview' | 'top-items' | 'tracked-items' | 'history-trend';
+
+export type NetworkOverviewOptions = {
+	showProduction: boolean;
+	showConsumption: boolean;
+	showNetChange: boolean;
+};
+
+export type TopItemsOptions = {
+	mode: 'production' | 'consumption';
+	count: number;
+	filter: 'items' | 'fluids' | 'all';
+};
+
+export type TrackedItemsOptions = {
+	trackedIds: string[];
+};
+
+export type HistoryTrendOptions = {
+	itemId: string;
+	timeRange: '1h' | '6h' | '24h' | '7d';
+};
+
+export type WidgetOptions =
+	| NetworkOverviewOptions
+	| TopItemsOptions
+	| TrackedItemsOptions
+	| HistoryTrendOptions;
+
+export type WidgetConfig = {
+	id: string;
+	type: WidgetType;
+	title?: string;
+	w: number;
+	h: number;
+	x: number;
+	y: number;
+	options: WidgetOptions;
+};
+
+export type DashboardConfig = {
+	widgets: WidgetConfig[];
 };

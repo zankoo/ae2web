@@ -4,16 +4,29 @@
 	import IconImage from '$lib/components/IconImage.svelte';
 	import { formatAmount, formatFluidAmount } from '$lib/utils/format';
 
-	export let renderNodes: InventoryRenderNode[] = [];
-	export let onItemClick: (item: InventoryItem) => void;
-	export let onToggleSection: (key: string) => void;
-	export let onMouseOver: (e: MouseEvent) => void;
-	export let onMouseMove: (e: MouseEvent) => void;
-	export let onMouseOut: (e: MouseEvent) => void;
-	export let onScroll: () => void;
+	let {
+		renderNodes = [],
+		onItemClick,
+		onToggleSection,
+		onMouseOver,
+		onMouseMove,
+		onMouseOut,
+		onScroll,
+		onItemContextMenu = null
+	}: {
+		renderNodes?: InventoryRenderNode[];
+		onItemClick: (item: InventoryItem) => void;
+		onToggleSection: (key: string) => void;
+		onMouseOver: (e: MouseEvent) => void;
+		onMouseMove: (e: MouseEvent) => void;
+		onMouseOut: (e: MouseEvent) => void;
+		onScroll: () => void;
+		/** Callback when item is right-clicked (opens production chart) */
+		onItemContextMenu?: ((item: InventoryItem, event: MouseEvent) => void) | null;
+	} = $props();
 
-	let scrollEl: HTMLDivElement | null = null;
-	let gridEl: HTMLDivElement | null = null;
+	let scrollEl = $state<HTMLDivElement | null>(null);
+	let gridEl = $state<HTMLDivElement | null>(null);
 
 	export function getScrollElement(): HTMLDivElement | null {
 		return scrollEl;
@@ -43,10 +56,10 @@
 </script>
 
 <div
-	class="flex-1 overflow-y-auto p-4 bg-muted/5 texture-dots-dark"
+	class="flex-1 overflow-y-scroll p-4 bg-muted/5 texture-dots-dark"
 	style="scrollbar-gutter: stable;"
 	bind:this={scrollEl}
-	on:scroll={onScroll}
+	onscroll={onScroll}
 >
 	<!-- svelte-ignore a11y_mouse_events_have_key_events -->
 	<div
@@ -55,9 +68,9 @@
 		role="grid"
 		tabindex="-1"
 		bind:this={gridEl}
-		on:mouseover={onMouseOver}
-		on:mousemove={onMouseMove}
-		on:mouseout={onMouseOut}
+		onmouseover={onMouseOver}
+		onmousemove={onMouseMove}
+		onmouseout={onMouseOut}
 	>
 		{#if renderNodes.length === 0}
 			<div
@@ -89,7 +102,7 @@
 							<button
 								class="w-5 h-5 flex items-center justify-center rounded hover:bg-muted text-foreground"
 								aria-label="{node.collapsed ? 'Expand' : 'Collapse'} {node.title}"
-								on:click={() => onToggleSection(node.key)}
+								onclick={() => onToggleSection(node.key)}
 							>
 								{node.collapsed ? '+' : '−'}
 							</button>
@@ -101,16 +114,26 @@
 					{@const item = node.item}
 					<div
 						class="item-slot {item.type === 'fluid' ? 'fluid' : ''} {item.craftable
-							? 'craftable'
+							? 'indicator'
 							: ''}"
 						data-item-id={item.uniqueId}
 						data-icon-id={item.iconKey}
 						data-item-type={item.type}
 						role="button"
 						tabindex="-1"
-						on:click={() => item.craftable && onItemClick(item)}
-						on:keydown={(e) => handleItemKeydown(e, item)}
+						onclick={() => item.craftable && onItemClick(item)}
+						onkeydown={(e) => handleItemKeydown(e, item)}
+						oncontextmenu={(e) => {
+							e.preventDefault();
+							onItemContextMenu?.(item, e);
+						}}
 					>
+						{#if item.craftable}
+							<span
+								class="indicator-item indicator-start indicator-top status status-info pointer-events-none"
+								style="--indicator-s: 6px; --indicator-t: 6px; --indicator-x: 0; --indicator-y: 0;"
+							></span>
+						{/if}
 						<IconImage iconKey={item.iconKey} alt={displayNameFor(item)} className="item-icon" />
 						<span class="item-name">{displayNameFor(item)}</span>
 						<span class="item-amount">

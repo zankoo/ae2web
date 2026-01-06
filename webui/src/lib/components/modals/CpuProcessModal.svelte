@@ -1,40 +1,68 @@
 <script lang="ts">
-	import type { CpuProcessEntryDto, CpuProcessResponse, GenericStackDto } from '$lib/api/types';
+	import type { CpuProcessEntryDto, CpuProcessResponse } from '$lib/api/types';
 	import IconImage from '$lib/components/IconImage.svelte';
-	import CpuDependencyTree from '$lib/components/CpuProcess/CpuDependencyTree.svelte';
 	import CpuProcessTreeRow from '$lib/components/CpuProcess/CpuProcessTreeRow.svelte';
 	import { PLACEHOLDER_ICON } from '$lib/constants';
-	import { formatAmount } from '$lib/utils/format';
+	import { formatAmount, formatFluidAmount } from '$lib/utils/format';
 
-	export let open: boolean = false;
-	export let cpuName: string | null = null;
-	export let autoRefresh: boolean = true;
-	export let loading: boolean = false;
-	export let error: string | null = null;
-	export let data: CpuProcessResponse | null = null;
-	export let onClose: () => void;
-	export let onRefresh: () => void;
-	export let onAutoRefreshChange: (value: boolean) => void;
+	// Dynamic import for code splitting - @xyflow/svelte + elkjs are ~1MB
+	const CpuDependencyGraphPromise = import('$lib/components/CpuProcess/CpuDependencyGraph.svelte');
+
+	function formatStackAmount(amount: number, type?: string): string {
+		return type === 'fluid' ? formatFluidAmount(amount) : formatAmount(amount);
+	}
+
+	let {
+		open = false,
+		cpuName = null,
+		autoRefresh = true,
+		loading = false,
+		error = null,
+		data = null,
+		onClose,
+		onRefresh,
+		onAutoRefreshChange
+	}: {
+		open?: boolean;
+		cpuName?: string | null;
+		autoRefresh?: boolean;
+		loading?: boolean;
+		error?: string | null;
+		data?: CpuProcessResponse | null;
+		onClose: () => void;
+		onRefresh: () => void;
+		onAutoRefreshChange: (value: boolean) => void;
+	} = $props();
 
 	type CpuProcessView = 'list' | 'statusTree' | 'dependencyTree';
-	let view: CpuProcessView = 'list';
-	let filter = '';
-	let lastOpen = false;
+	let view = $state<CpuProcessView>('list');
+	let filter = $state('');
+	let lastOpen = $state(false);
 
-	$: entries = Array.isArray(data?.entries) ? data.entries : [];
-	$: filterTerm = filter.trim().toLowerCase();
-	$: entriesFiltered = filterTerm
-		? entries.filter((e) => {
-				const stack = e?.stack;
-				const name = String(stack?.name ?? '').toLowerCase();
-				const id = String(stack?.id ?? '').toLowerCase();
-				return name.includes(filterTerm) || id.includes(filterTerm);
-			})
-		: entries;
+	let entries = $derived(Array.isArray(data?.entries) ? data.entries : []);
+	let filterTerm = $derived(filter.trim().toLowerCase());
+	let entriesFiltered = $derived(
+		filterTerm
+			? entries.filter((e) => {
+					const stack = e?.stack;
+					const name = String(stack?.name ?? '').toLowerCase();
+					const id = String(stack?.id ?? '').toLowerCase();
+					return name.includes(filterTerm) || id.includes(filterTerm);
+				})
+			: entries
+	);
 
-	$: entriesActive = entriesFiltered.filter((e) => Number(e?.active ?? 0) > 0);
-	$: entriesWaiting = entriesFiltered.filter((e) => Number(e?.waiting ?? 0) > 0);
-	$: entriesStored = entriesFiltered.filter((e) => Number(e?.stored ?? 0) > 0);
+	let entriesActive = $derived(entriesFiltered.filter((e) => Number(e?.active ?? 0) > 0));
+	let entriesWaiting = $derived(entriesFiltered.filter((e) => Number(e?.waiting ?? 0) > 0));
+	let entriesStored = $derived(entriesFiltered.filter((e) => Number(e?.stored ?? 0) > 0));
+
+	type StatusKey = 'active' | 'waiting' | 'stored';
+	type StatusSection = { title: string; list: CpuProcessEntryDto[]; key: StatusKey };
+	let statusSections = $derived<StatusSection[]>([
+		{ title: 'Active', list: entriesActive, key: 'active' },
+		{ title: 'Waiting', list: entriesWaiting, key: 'waiting' },
+		{ title: 'Stored', list: entriesStored, key: 'stored' }
+	]);
 
 	function formatElapsedNanos(elapsedTimeNanos: number | undefined): string {
 		const nanos = Number(elapsedTimeNanos);
@@ -56,11 +84,13 @@
 	}
 
 	// Reset view and filter only when modal first opens (not on data refresh)
-	$: if (open && !lastOpen) {
-		view = 'list';
-		filter = '';
-	}
-	$: lastOpen = open;
+	$effect(() => {
+		if (open && !lastOpen) {
+			view = 'list';
+			filter = '';
+		}
+		lastOpen = open;
+	});
 </script>
 
 <dialog class="modal" class:modal-open={open}>
@@ -88,17 +118,17 @@
 						type="checkbox"
 						class="checkbox checkbox-sm checkbox-primary"
 						checked={autoRefresh}
-						on:change={handleAutoRefreshChange}
+						onchange={handleAutoRefreshChange}
 					/>
 					<span>Auto-refresh</span>
 				</label>
-				<button class="btn btn-sm btn-ghost" on:click={onRefresh}>
+				<button class="btn btn-sm btn-ghost" onclick={onRefresh}>
 					{#if loading}
 						<span class="loading loading-spinner loading-xs"></span>
 					{/if}
 					Refresh
 				</button>
-				<button class="btn btn-sm btn-ghost btn-circle" aria-label="Close" on:click={onClose}>
+				<button class="btn btn-sm btn-ghost btn-circle" aria-label="Close" onclick={onClose}>
 					<svg
 						class="w-4 h-4"
 						viewBox="0 0 24 24"
@@ -114,18 +144,18 @@
 
 		<!-- Tabs -->
 		<div class="tabs tabs-boxed bg-base-200 mx-4 mt-4">
-			<button class="tab" class:tab-active={view === 'list'} on:click={() => (view = 'list')}
+			<button class="tab" class:tab-active={view === 'list'} onclick={() => (view = 'list')}
 				>List</button
 			>
 			<button
 				class="tab"
 				class:tab-active={view === 'statusTree'}
-				on:click={() => (view = 'statusTree')}>Status Tree</button
+				onclick={() => (view = 'statusTree')}>Status Tree</button
 			>
 			<button
 				class="tab"
 				class:tab-active={view === 'dependencyTree'}
-				on:click={() => (view = 'dependencyTree')}>Dependency Tree</button
+				onclick={() => (view = 'dependencyTree')}>Dependency Tree</button
 			>
 		</div>
 
@@ -156,8 +186,8 @@
 						: 0}
 
 				{#if data.busy === false}
-					<div class="alert alert-warning mb-4">
-						<span>CPU is no longer busy.</span>
+					<div class="alert alert-success mb-4">
+						<span>Crafting completed.</span>
 					</div>
 				{/if}
 
@@ -188,7 +218,10 @@
 							<div class="flex justify-between text-sm mb-1">
 								<span class="font-mono text-base-content/60">
 									{#if hasOutput}
-										{formatAmount(outputDone)} / {formatAmount(outputTotal)}
+										{formatStackAmount(outputDone, output?.type)} / {formatStackAmount(
+											outputTotal,
+											output?.type
+										)}
 									{:else}
 										{formatAmount(progress)} / {formatAmount(totalItems)}
 									{/if}
@@ -228,7 +261,11 @@
 							<tbody>
 								{#each entriesFiltered as row (row.stack.iconKey)}
 									{@const stack = row.stack}
-									<tr class="hover:bg-base-200">
+									{@const isWaiting = Number(row.waiting ?? 0) > 0}
+									<tr
+										data-process-highlight={isWaiting ? 'waiting' : undefined}
+										class="hover:bg-base-200 {isWaiting ? 'bg-warning/10 hover:bg-warning/15' : ''}"
+									>
 										<td>
 											<div class="flex items-center gap-2">
 												{#if stack.iconKey}
@@ -248,9 +285,15 @@
 												</div>
 											</div>
 										</td>
-										<td class="text-right font-mono">{formatAmount(Number(row.stored ?? 0))}</td>
-										<td class="text-right font-mono">{formatAmount(Number(row.waiting ?? 0))}</td>
-										<td class="text-right font-mono">{formatAmount(Number(row.active ?? 0))}</td>
+										<td class="text-right font-mono"
+											>{formatStackAmount(Number(row.stored ?? 0), row.stack?.type)}</td
+										>
+										<td class="text-right font-mono"
+											>{formatStackAmount(Number(row.waiting ?? 0), row.stack?.type)}</td
+										>
+										<td class="text-right font-mono"
+											>{formatStackAmount(Number(row.active ?? 0), row.stack?.type)}</td
+										>
 									</tr>
 								{/each}
 							</tbody>
@@ -258,11 +301,7 @@
 					</div>
 				{:else if view === 'statusTree'}
 					<div class="space-y-3">
-						{#each [
-							{ title: 'Active', list: entriesActive, key: 'active' },
-							{ title: 'Waiting', list: entriesWaiting, key: 'waiting' },
-							{ title: 'Stored', list: entriesStored, key: 'stored' }
-						] as section}
+						{#each statusSections as section (section.key)}
 							<div class="collapse collapse-arrow bg-base-300 rounded-lg">
 								<input type="checkbox" checked={section.title !== 'Stored'} />
 								<div class="collapse-title font-medium flex items-center justify-between">
@@ -273,11 +312,7 @@
 									<div class="space-y-2 pt-2">
 										{#each section.list as row (row.stack.iconKey)}
 											{@const val = row[section.key]}
-											<CpuProcessTreeRow
-												stack={row.stack}
-												value={typeof val === 'string' ? val : String(val)}
-												label={section.title}
-											/>
+											<CpuProcessTreeRow stack={row.stack} value={val} label={section.title} />
 										{/each}
 									</div>
 								</div>
@@ -290,12 +325,24 @@
 							No pattern/task data available for this job.
 						</div>
 					{:else}
-						<div class="bg-base-300 rounded-lg p-4 overflow-auto">
-							<CpuDependencyTree
-								root={data.summary.finalOutput}
-								patterns={data.patterns}
-								entries={data.entries}
-							/>
+						<div class="bg-base-300 rounded-lg p-4">
+							{#await CpuDependencyGraphPromise}
+								<div class="flex items-center justify-center h-32">
+									<span class="loading loading-spinner loading-lg text-primary"></span>
+									<span class="ml-2 text-base-content/60">Loading dependency graph...</span>
+								</div>
+							{:then module}
+								{@const Component = module.default}
+								<Component
+									root={data.summary.finalOutput}
+									patterns={data.patterns}
+									entries={data.entries}
+								/>
+							{:catch error}
+								<div class="alert alert-error">
+									<span>Failed to load dependency graph: {error?.message ?? 'Unknown error'}</span>
+								</div>
+							{/await}
 						</div>
 					{/if}
 				{/if}
@@ -307,6 +354,6 @@
 		</div>
 	</div>
 	<form method="dialog" class="modal-backdrop bg-black/60">
-		<button on:click={onClose}>close</button>
+		<button onclick={onClose}>close</button>
 	</form>
 </dialog>

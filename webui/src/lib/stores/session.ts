@@ -81,4 +81,3 @@ authToken.subscribe((token) => {
 export function setAuthToken(token: string): void {
 	authToken.set(normalizeToken(token));
 }
-

@@ -1,17 +1,29 @@
+<script lang="ts" module>
+	export type SortMode = 'amount' | 'name';
+</script>
+
 <script lang="ts">
 	import type { InventoryFilter } from '$lib/api/inventory';
-	import Badge from '$lib/components/Badge.svelte';
 
-	export type SortMode = 'amount' | 'name';
-
-	export let filter: InventoryFilter = 'all';
-	export let sort: SortMode = 'amount';
-	export let searchValue: string = '';
-	export let onFilterChange: (filter: InventoryFilter) => void;
-	export let onSortChange: (sort: SortMode) => void;
-	export let onSearchInput: () => void;
-	export let onSearchKeyUp: (e: KeyboardEvent) => void;
-	export let onClearSearch: () => void;
+	let {
+		filter = 'all',
+		sort = 'amount',
+		searchValue = $bindable(''),
+		onFilterChange,
+		onSortChange,
+		onSearchInput,
+		onSearchKeyUp,
+		onClearSearch
+	}: {
+		filter?: InventoryFilter;
+		sort?: SortMode;
+		searchValue?: string;
+		onFilterChange: (filter: InventoryFilter) => void;
+		onSortChange: (sort: SortMode) => void;
+		onSearchInput: () => void;
+		onSearchKeyUp: (e: KeyboardEvent) => void;
+		onClearSearch: () => void;
+	} = $props();
 </script>
 
 <!-- Panel Header -->
@@ -21,7 +33,11 @@
 			Network Storage
 		</h2>
 		{#if filter !== 'all'}
-			<Badge label={filter} className="hidden sm:inline-flex" />
+			<span
+				class="badge badge-outline badge-sm hidden sm:inline-flex font-mono uppercase tracking-widest"
+			>
+				{filter}
+			</span>
 		{/if}
 	</div>
 
@@ -33,7 +49,7 @@
 				'amount'
 					? 'bg-muted text-foreground font-medium'
 					: 'text-muted-foreground'}"
-				on:click={() => onSortChange('amount')}
+				onclick={() => onSortChange('amount')}
 			>
 				Amount
 			</button>
@@ -41,7 +57,7 @@
 				class="join-item btn btn-xs btn-ghost hover:bg-muted font-sans font-normal {sort === 'name'
 					? 'bg-muted text-foreground font-medium'
 					: 'text-muted-foreground'}"
-				on:click={() => onSortChange('name')}
+				onclick={() => onSortChange('name')}
 			>
 				Name
 			</button>
@@ -49,11 +65,10 @@
 		<div class="w-px h-4 bg-border mx-1"></div>
 		<div class="join shadow-sm border border-border rounded-lg bg-card">
 			<button
-				class="join-item btn btn-xs btn-ghost hover:bg-muted font-sans font-normal {filter ===
-				'all'
+				class="join-item btn btn-xs btn-ghost hover:bg-muted font-sans font-normal {filter === 'all'
 					? 'bg-muted text-foreground font-medium'
 					: 'text-muted-foreground'}"
-				on:click={() => onFilterChange('all')}
+				onclick={() => onFilterChange('all')}
 			>
 				All
 			</button>
@@ -62,7 +77,7 @@
 				'items'
 					? 'bg-muted text-foreground font-medium'
 					: 'text-muted-foreground'}"
-				on:click={() => onFilterChange('items')}
+				onclick={() => onFilterChange('items')}
 			>
 				Items
 			</button>
@@ -71,7 +86,7 @@
 				'fluids'
 					? 'bg-muted text-foreground font-medium'
 					: 'text-muted-foreground'}"
-				on:click={() => onFilterChange('fluids')}
+				onclick={() => onFilterChange('fluids')}
 			>
 				Fluids
 			</button>
@@ -99,22 +114,16 @@
 			class="input input-sm w-full pl-10 pr-10 bg-muted/30 border-border focus:border-accent focus:ring-1 focus:ring-accent font-mono text-sm transition-all rounded-lg"
 			placeholder="Search system..."
 			bind:value={searchValue}
-			on:keyup={onSearchKeyUp}
-			on:input={onSearchInput}
+			onkeyup={onSearchKeyUp}
+			oninput={onSearchInput}
 		/>
 		{#if searchValue}
 			<button
 				class="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer text-muted-foreground hover:text-foreground"
 				aria-label="Clear search"
-				on:click={onClearSearch}
+				onclick={onClearSearch}
 			>
-				<svg
-					class="h-4 w-4"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-				>
+				<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<line x1="18" y1="6" x2="6" y2="18"></line>
 					<line x1="6" y1="6" x2="18" y2="18"></line>
 				</svg>

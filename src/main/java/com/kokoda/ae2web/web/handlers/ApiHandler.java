@@ -130,6 +130,20 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                     sendMethodNotAllowed(ctx, headers);
                 }
             }
+            case "/api/user/dashboardConfig" -> {
+                if (method == HttpMethod.GET || method == HttpMethod.POST) {
+                    DashboardConfigHandler.handleDashboardConfig(ctx, request, params, headers);
+                } else {
+                    sendMethodNotAllowed(ctx, headers);
+                }
+            }
+            case "/api/history" -> {
+                if (method == HttpMethod.GET) {
+                    HistoryHandler.handleHistory(ctx, request, params, headers);
+                } else {
+                    sendMethodNotAllowed(ctx, headers);
+                }
+            }
             default -> {
                 if (path.startsWith("/api/prerender/")) {
                     PrerenderHandler.route(ctx, request, path, method, params, headers);

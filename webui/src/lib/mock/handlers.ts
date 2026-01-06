@@ -12,8 +12,11 @@ import type {
 	InventoryViewConfig,
 	TooltipResponse,
 	CraftOkResponse,
+	CraftRequest,
+	GenericStackDto,
 	InventoryItem
 } from '$lib/api/types';
+import { CraftMissingError } from '$lib/api/client';
 import type { InventorySseHandlers } from '$lib/api/inventory';
 import {
 	mockStatus,
@@ -158,8 +161,166 @@ export async function mockFetchTooltip(iconKey: string): Promise<TooltipResponse
 	};
 }
 
-export async function mockSubmitCraft(): Promise<CraftOkResponse> {
+// Mock missing items data for shortage test items
+const mockMissingItems: Record<string, GenericStackDto[]> = {
+	'test:shortage_basic': [
+		{
+			id: 'minecraft:diamond',
+			iconKey: 'minecraft:diamond',
+			name: 'Diamond',
+			translationKey: 'item.minecraft.diamond',
+			amount: 64,
+			type: 'item'
+		}
+	],
+	'test:shortage_multiple': [
+		{
+			id: 'minecraft:diamond',
+			iconKey: 'minecraft:diamond',
+			name: 'Diamond',
+			translationKey: 'item.minecraft.diamond',
+			amount: 128,
+			type: 'item'
+		},
+		{
+			id: 'minecraft:emerald',
+			iconKey: 'minecraft:emerald',
+			name: 'Emerald',
+			translationKey: 'item.minecraft.emerald',
+			amount: 64,
+			type: 'item'
+		},
+		{
+			id: 'ae2:fluix_crystal',
+			iconKey: 'ae2:fluix_crystal',
+			name: 'Fluix Crystal',
+			translationKey: 'item.ae2.fluix_crystal',
+			amount: 256,
+			type: 'item'
+		},
+		{
+			id: 'minecraft:netherite_ingot',
+			iconKey: 'minecraft:netherite_ingot',
+			name: 'Netherite Ingot',
+			translationKey: 'item.minecraft.netherite_ingot',
+			amount: 16,
+			type: 'item'
+		},
+		{
+			id: 'ae2:engineering_processor',
+			iconKey: 'ae2:engineering_processor',
+			name: 'Engineering Processor',
+			translationKey: 'item.ae2.engineering_processor',
+			amount: 32,
+			type: 'item'
+		}
+	],
+	'test:shortage_many': [
+		{
+			id: 'minecraft:diamond',
+			iconKey: 'minecraft:diamond',
+			name: 'Diamond',
+			translationKey: 'item.minecraft.diamond',
+			amount: 512,
+			type: 'item'
+		},
+		{
+			id: 'minecraft:emerald',
+			iconKey: 'minecraft:emerald',
+			name: 'Emerald',
+			translationKey: 'item.minecraft.emerald',
+			amount: 256,
+			type: 'item'
+		},
+		{
+			id: 'minecraft:gold_ingot',
+			iconKey: 'minecraft:gold_ingot',
+			name: 'Gold Ingot',
+			translationKey: 'item.minecraft.gold_ingot',
+			amount: 1024,
+			type: 'item'
+		},
+		{
+			id: 'minecraft:iron_ingot',
+			iconKey: 'minecraft:iron_ingot',
+			name: 'Iron Ingot',
+			translationKey: 'item.minecraft.iron_ingot',
+			amount: 2048,
+			type: 'item'
+		},
+		{
+			id: 'ae2:fluix_crystal',
+			iconKey: 'ae2:fluix_crystal',
+			name: 'Fluix Crystal',
+			translationKey: 'item.ae2.fluix_crystal',
+			amount: 512,
+			type: 'item'
+		},
+		{
+			id: 'ae2:certus_quartz_crystal',
+			iconKey: 'ae2:certus_quartz_crystal',
+			name: 'Certus Quartz Crystal',
+			translationKey: 'item.ae2.certus_quartz_crystal',
+			amount: 256,
+			type: 'item'
+		},
+		{
+			id: 'minecraft:netherite_ingot',
+			iconKey: 'minecraft:netherite_ingot',
+			name: 'Netherite Ingot',
+			translationKey: 'item.minecraft.netherite_ingot',
+			amount: 64,
+			type: 'item'
+		},
+		{
+			id: 'ae2:engineering_processor',
+			iconKey: 'ae2:engineering_processor',
+			name: 'Engineering Processor',
+			translationKey: 'item.ae2.engineering_processor',
+			amount: 128,
+			type: 'item'
+		},
+		{
+			id: 'ae2:calculation_processor',
+			iconKey: 'ae2:calculation_processor',
+			name: 'Calculation Processor',
+			translationKey: 'item.ae2.calculation_processor',
+			amount: 64,
+			type: 'item'
+		},
+		{
+			id: 'ae2:logic_processor',
+			iconKey: 'ae2:logic_processor',
+			name: 'Logic Processor',
+			translationKey: 'item.ae2.logic_processor',
+			amount: 64,
+			type: 'item'
+		},
+		{
+			id: 'minecraft:redstone',
+			iconKey: 'minecraft:redstone',
+			name: 'Redstone Dust',
+			translationKey: 'item.minecraft.redstone',
+			amount: 4096,
+			type: 'item'
+		},
+		{
+			id: 'minecraft:glowstone_dust',
+			iconKey: 'minecraft:glowstone_dust',
+			name: 'Glowstone Dust',
+			translationKey: 'item.minecraft.glowstone_dust',
+			amount: 1024,
+			type: 'item'
+		}
+	]
+};
+
+export async function mockSubmitCraft(request: CraftRequest): Promise<CraftOkResponse> {
 	await delay(300);
+	const missing = mockMissingItems[request.id];
+	if (missing) {
+		throw new CraftMissingError('Missing items for crafting', missing);
+	}
 	return { status: 'submitted' };
 }
 
@@ -170,6 +331,7 @@ class MockEventSource {
 	private intervalId: ReturnType<typeof setInterval> | null = null;
 	private items: InventoryItem[];
 	private terminalId: string;
+	private version = 1;
 
 	constructor(terminalId: string, handlers: InventorySseHandlers) {
 		this.handlers = handlers;
@@ -181,14 +343,14 @@ class MockEventSource {
 			if (this.closed) return;
 
 			// Send hello
-			this.handlers.onHello?.({ terminalId: this.terminalId, version: 1 });
+			this.handlers.onHello?.({ terminalId: this.terminalId, version: this.version });
 
 			// Send initial snapshot
 			setTimeout(() => {
 				if (this.closed) return;
 				this.handlers.onSnapshot?.({
 					terminalId: this.terminalId,
-					version: 1,
+					version: this.version,
 					items: this.items,
 					total: this.items.length
 				});
@@ -212,16 +374,21 @@ class MockEventSource {
 			// Random amount change
 			const change = Math.floor(Math.random() * 100) - 50;
 			const newAmount = Math.max(0, item.amount + change);
+			this.version += 1;
+			const nextItem = { ...item, amount: newAmount };
+			this.items[randomIndex] = nextItem;
 
 			this.handlers.onDelta?.({
 				terminalId: this.terminalId,
-				version: 1,
+				version: this.version,
+				added: [],
+				removed: [],
 				updated: [
 					{
-						uniqueId: item.uniqueId,
+						uniqueId: nextItem.uniqueId,
 						amount: newAmount,
-						craftable: item.craftable,
-						name: item.name
+						craftable: nextItem.craftable,
+						name: nextItem.name
 					}
 				]
 			});

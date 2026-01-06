@@ -1,14 +1,23 @@
 import { get } from 'svelte/store';
 
 import { authToken } from '$lib/stores/session';
+import type { GenericStackDto } from '$lib/api/types';
 
-type ErrorBody = { error?: string };
+type ErrorBody = { error?: unknown; missing?: unknown };
 
-async function tryReadError(resp: Response): Promise<string | null> {
+export class CraftMissingError extends Error {
+	readonly missing: GenericStackDto[];
+
+	constructor(message: string, missing: GenericStackDto[]) {
+		super(message);
+		this.name = 'CraftMissingError';
+		this.missing = missing;
+	}
+}
+
+async function tryReadErrorBody(resp: Response): Promise<ErrorBody | null> {
 	try {
-		const json = (await resp.clone().json()) as ErrorBody;
-		const error = json?.error;
-		return typeof error === 'string' && error.trim() ? error : null;
+		return (await resp.clone().json()) as ErrorBody;
 	} catch {
 		return null;
 	}
@@ -28,8 +37,18 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
 
 	const resp = await fetch(path, { ...init, headers });
 	if (!resp.ok) {
-		const serverMsg = await tryReadError(resp);
-		throw new Error(serverMsg ?? `HTTP ${resp.status}`);
+		const body = await tryReadErrorBody(resp);
+		const errorMsg =
+			body && typeof body.error === 'string' && body.error.trim() ? body.error.trim() : null;
+
+		if (body && Array.isArray(body.missing)) {
+			throw new CraftMissingError(
+				errorMsg ?? 'Missing items for crafting',
+				body.missing as GenericStackDto[]
+			);
+		}
+
+		throw new Error(errorMsg ?? `HTTP ${resp.status}`);
 	}
 
 	return (await resp.json()) as T;
@@ -45,4 +64,3 @@ export function withTokenQuery(url: string): string {
 	parsed.searchParams.set('token', token);
 	return parsed.toString();
 }
-

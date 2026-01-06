@@ -39,7 +39,11 @@
 	"dependencies": {
 		"@fontsource/inter": "^5.2.8",
 		"@fontsource/jetbrains-mono": "^5.2.8",
+		"@xyflow/svelte": "^1.5.0",
+		"echarts": "^6.0.0",
+		"elkjs": "^0.11.0",
 		"lodash-es": "^4.17.22",
-		"pinyin-match": "^1.2.10"
+		"pinyin-match": "^1.2.10",
+		"svelte-dnd-action": "^0.9.69"
 	}
 }

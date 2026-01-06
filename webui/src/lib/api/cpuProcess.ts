@@ -11,4 +11,3 @@ export function fetchCpuProcess(terminalId: string, cpuId: string): Promise<CpuP
 	if (cpuId) params.set('cpuId', cpuId);
 	return apiJson<CpuProcessResponse>(`/api/cpus/process?${params}`);
 }
-
