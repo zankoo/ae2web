@@ -9,7 +9,7 @@
 	import { fetchCpus } from '$lib/api/cpus';
 	import { fetchCpuProcess } from '$lib/api/cpuProcess';
 	import { submitCraft } from '$lib/api/craft';
-	import { openInventorySse, type InventoryFilter } from '$lib/api/inventory';
+	import { type InventoryFilter } from '$lib/api/inventory';
 	import { fetchInventoryViewConfig, saveInventoryViewConfig } from '$lib/api/userConfig';
 	import type {
 		CpuDto,
@@ -52,13 +52,10 @@
 	import { captureScrollAnchor, restoreScrollAnchor } from '$lib/pages/inventory/scrollAnchor';
 	import { createCpuProcessController } from '$lib/pages/inventory/useCpuProcess';
 	import { createInventoryConfigController } from '$lib/pages/inventory/useInventoryConfig';
+	import { createInventorySseController } from '$lib/pages/inventory/useInventorySse';
 	import { createTooltipController } from '$lib/pages/inventory/useTooltip';
 	import { computeVisibleItems, hasPositionChanged } from '$lib/pages/inventory/visibleItems';
-	import {
-		loadTerminalHistory,
-		queueHistoryUpdate,
-		forceFlush as forceFlushHistory
-	} from '$lib/storage/productionHistory';
+	import { forceFlush as forceFlushHistory } from '$lib/storage/productionHistory';
 
 	let loginError = $state<string | null>(null);
 	let needsLogin = $derived(!$authToken || !$authToken.trim());
@@ -86,14 +83,13 @@
 	let typeCount = $derived(visibleItems.length);
 
 	let inventoryGridComponent: InventoryGrid;
-	let inventoryEventSource: ReturnType<typeof openInventorySse> | null = null;
-	let lastInventoryEventVersion: number | null = null;
 
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- rebuilt on SSE updates
 	let inventoryState = new Map<string, InventoryItem>();
 	let inventoryStateDirty = false;
 	let inventoryStateFlushInFlight = false;
 	let inventoryStateFlushPending = false;
+	let inventoryScrollActive = false;
 
 	// Production stats tracker instance
 	const productionStats = new ProductionStatsTracker();
@@ -103,31 +99,8 @@
 	const chartViewedItems = new Set<string>();
 
 	// Production rate cache - avoid repeated calculations
-	const RATE_CACHE_TTL = 200; // 200ms
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- cache Map, not reactive
 	const productionRateCache = new Map<string, { rate: number | null; timestamp: number }>();
-
-	/**
-	 * Get production rate for an item with caching.
-	 * @returns rate per second, or null if not available
-	 */
-	function getProductionRate(uniqueId: string): number | null {
-		if (!terminalId) return null;
-
-		const now = Date.now();
-		const cached = productionRateCache.get(uniqueId);
-
-		if (cached && now - cached.timestamp < RATE_CACHE_TTL) {
-			return cached.rate;
-		}
-
-		const rate = productionStats.getRate(terminalId, uniqueId, now);
-		productionRateCache.set(uniqueId, { rate, timestamp: now });
-		return rate;
-	}
-
-	let inventoryScrollActive = false;
-	let inventoryScrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let cpus = $state<CpuDto[]>([]);
 	let inventoryViewConfig = $state<InventoryViewConfig>({
@@ -224,6 +197,47 @@
 		saveInventoryViewConfig,
 		showToast,
 		setAuthToken
+	});
+
+	const inventorySseController = createInventorySseController({
+		state: {
+			get inventoryState() {
+				return inventoryState;
+			},
+			set inventoryState(value) {
+				inventoryState = value;
+			},
+			get inventoryStateDirty() {
+				return inventoryStateDirty;
+			},
+			set inventoryStateDirty(value) {
+				inventoryStateDirty = value;
+			},
+			get inventoryStateFlushInFlight() {
+				return inventoryStateFlushInFlight;
+			},
+			set inventoryStateFlushInFlight(value) {
+				inventoryStateFlushInFlight = value;
+			},
+			get inventoryStateFlushPending() {
+				return inventoryStateFlushPending;
+			},
+			set inventoryStateFlushPending(value) {
+				inventoryStateFlushPending = value;
+			},
+			get inventoryScrollActive() {
+				return inventoryScrollActive;
+			},
+			set inventoryScrollActive(value) {
+				inventoryScrollActive = value;
+			}
+		},
+		getTerminalId: () => terminalId,
+		productionStats,
+		chartViewedItems,
+		productionRateCache,
+		flushInventoryState,
+		showToast
 	});
 
 	let craftOpen = $state(false);
@@ -353,149 +367,13 @@
 	}
 
 	function onInventoryScroll(): void {
-		inventoryScrollActive = true;
-		if (inventoryScrollTimer) {
-			clearTimeout(inventoryScrollTimer);
-		}
-		inventoryScrollTimer = setTimeout(() => {
-			inventoryScrollTimer = null;
-			inventoryScrollActive = false;
-			if (inventoryStateDirty && !document.hidden) {
-				void flushInventoryState();
-			}
-		}, 150);
+		inventorySseController.onScroll();
 	}
 
 	const applySearchDebounced = debounce(() => {
 		searchTerm = searchValue.trim();
 		void recomputeInventory({ preserveAnchor: false });
 	}, 500);
-
-	function stopInventoryEventStream(): void {
-		lastInventoryEventVersion = null;
-		inventoryStateDirty = false;
-		inventoryStateFlushInFlight = false;
-		inventoryStateFlushPending = false;
-		if (inventoryScrollTimer) {
-			clearTimeout(inventoryScrollTimer);
-			inventoryScrollTimer = null;
-		}
-		if (inventoryEventSource) {
-			try {
-				inventoryEventSource.close();
-			} catch {
-				// ignore
-			}
-			inventoryEventSource = null;
-		}
-	}
-
-	function startInventoryEventStream(): void {
-		stopInventoryEventStream();
-		if (!terminalId) return;
-
-		inventoryEventSource = openInventorySse(terminalId, {
-			onHello: (msg) => {
-				lastInventoryEventVersion = msg.version;
-			},
-			onSnapshot: (msg) => {
-				if (msg.terminalId !== terminalId) return;
-
-				inventoryState = new Map(msg.items.map((item) => [item.uniqueId, item]));
-				inventoryStateDirty = true;
-				lastInventoryEventVersion = msg.version;
-
-				// Clear production stats and cache for this terminal
-				productionStats.clearTerminal(terminalId);
-				productionRateCache.clear();
-
-				// Load persisted history first, then set baselines
-				// This prevents time-travel issues where resetBaseline(now) followed by
-				// recordUpdate(old_timestamp) would corrupt the window point order
-				void loadTerminalHistory(terminalId).then((historyMap) => {
-					const now = Date.now();
-
-					// Load historical points for items that have history
-					for (const [uniqueId, points] of historyMap) {
-						productionStats.loadHistoricalPoints(terminalId, uniqueId, points);
-						chartViewedItems.add(uniqueId);
-					}
-
-					// Set baselines for all current items
-					for (const item of msg.items) {
-						const entry = productionStats.getEntry(terminalId, item.uniqueId);
-						if (!entry) {
-							// No history, create fresh baseline
-							productionStats.resetBaseline(terminalId, item.uniqueId, item.amount, now);
-						} else if (entry.lastPoint.amount !== item.amount) {
-							// Has history but amount changed, record update
-							productionStats.recordUpdate(terminalId, item.uniqueId, item.amount, now);
-						}
-						// If amount is same as history, no action needed
-					}
-				});
-
-				void flushInventoryState();
-			},
-			onDelta: (msg) => {
-				if (msg.terminalId !== terminalId) return;
-				if (lastInventoryEventVersion == null) return;
-				if (msg.version !== lastInventoryEventVersion + 1) {
-					showToast('Inventory stream out of sync, resyncing...', 'error');
-					startInventoryEventStream();
-					return;
-				}
-
-				lastInventoryEventVersion = msg.version;
-				const now = Date.now();
-
-				for (const id of msg.removed) {
-					inventoryState.delete(id);
-					// Reset baseline to 0 (removes entry)
-					productionStats.resetBaseline(terminalId, id, 0, now);
-				}
-
-				for (const item of msg.added) {
-					inventoryState.set(item.uniqueId, item);
-					// Reset baseline for newly added items (don't count as production spike)
-					productionStats.resetBaseline(terminalId, item.uniqueId, item.amount, now);
-				}
-
-				for (const patch of msg.updated) {
-					const prev = inventoryState.get(patch.uniqueId);
-					if (!prev) continue;
-
-					// Record update for production stats (before changing inventoryState)
-					if (prev.amount !== patch.amount) {
-						productionStats.recordUpdate(terminalId, patch.uniqueId, patch.amount, now);
-
-						// Update cache immediately for this item
-						const newRate = productionStats.getRate(terminalId, patch.uniqueId, now);
-						productionRateCache.set(patch.uniqueId, { rate: newRate, timestamp: now });
-
-						// Persist if this item was viewed in chart
-						if (chartViewedItems.has(patch.uniqueId)) {
-							const points = productionStats.getPoints(terminalId, patch.uniqueId);
-							if (points) {
-								queueHistoryUpdate(terminalId, patch.uniqueId, points);
-							}
-						}
-					}
-
-					const nextName = patch.name ?? prev.name;
-					inventoryState.set(patch.uniqueId, {
-						...prev,
-						amount: patch.amount,
-						craftable: patch.craftable,
-						name: nextName
-					});
-				}
-
-				inventoryStateDirty = true;
-				void flushInventoryState();
-			}
-		});
-	}
 
 	// Track previous terminal ID to detect changes
 	let previousTerminalId = '';
@@ -510,7 +388,7 @@
 
 			if (!currentTerminalId) {
 				// Terminal disconnected
-				stopInventoryEventStream();
+				inventorySseController.stop();
 				inventoryItems = [];
 				inventoryState = new Map();
 				visibleItems = [];
@@ -528,7 +406,7 @@
 				productionRateCache.clear();
 				chartViewedItems.clear();
 				void loadCpus();
-				startInventoryEventStream();
+				inventorySseController.start();
 				void inventoryConfigController.loadForTerminal(currentTerminalId);
 			}
 		}
@@ -574,7 +452,7 @@
 	}
 
 	function refreshData(): void {
-		startInventoryEventStream();
+		inventorySseController.start();
 	}
 
 	function openTerminalDropdown(): void {
@@ -711,7 +589,7 @@
 			clearInterval(cpuTimer);
 			cpuProcessController.destroy();
 			document.removeEventListener('keydown', onKeyDown);
-			stopInventoryEventStream();
+			inventorySseController.stop();
 			tooltipController.destroy();
 			applySearchDebounced.cancel();
 			inventoryConfigController.destroy();
@@ -751,7 +629,7 @@
 		};
 	});
 
-	onDestroy(() => stopInventoryEventStream());
+	onDestroy(() => inventorySseController.stop());
 	onDestroy(() => cpuProcessController.destroy());
 	onDestroy(() => tooltipController.destroy());
 	onDestroy(() => inventoryConfigController.destroy());
@@ -969,7 +847,7 @@
 	open={productionChartOpen}
 	item={productionChartItem}
 	getPoints={getProductionPoints}
-	getRate={getProductionRate}
+	getRate={inventorySseController.getProductionRate}
 	onClose={closeProductionChartModal}
 />
 

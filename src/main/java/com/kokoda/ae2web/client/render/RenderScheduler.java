@@ -5,6 +5,7 @@ import appeng.api.stacks.AEItemKey;
 import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.client.network.PrerenderHttpClient;
 import com.kokoda.ae2web.util.IconKeyUtils;
+import com.kokoda.ae2web.util.LegacyTextFormatter;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -12,8 +13,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
-import net.minecraft.network.chat.TextColor;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
@@ -377,91 +376,18 @@ public class RenderScheduler {
             try {
                 boolean advanced = mc.options.advancedItemTooltips;
                 flag = advanced ? TooltipFlag.Default.ADVANCED : TooltipFlag.Default.NORMAL;
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                AE2WebMod.LOGGER.debug("Failed to read advancedItemTooltips option, using NORMAL", e);
                 flag = TooltipFlag.Default.NORMAL;
             }
 
             return stack.getTooltipLines(player, flag).stream()
-                    .map(RenderScheduler::componentToLegacy)
+                    .map(LegacyTextFormatter::componentToLegacy)
                     .filter(s -> s != null && !s.isBlank())
                     .collect(Collectors.toList());
         } catch (Exception ignored) {
             return List.of();
         }
-    }
-
-    private static String componentToLegacy(Component component) {
-        if (component == null) {
-            return "";
-        }
-
-        StringBuilder out = new StringBuilder();
-        component.visit((style, text) -> {
-            if (text == null || text.isEmpty()) {
-                return Optional.empty();
-            }
-            out.append(styleToLegacy(style));
-            out.append(text);
-            return Optional.empty();
-        }, Style.EMPTY);
-        return out.toString();
-    }
-
-    private static String styleToLegacy(Style style) {
-        if (style == null) {
-            return "§r";
-        }
-
-        StringBuilder out = new StringBuilder("§r");
-
-        TextColor color = style.getColor();
-        if (color != null) {
-            String code = rgbToLegacyColorCode(color.getValue());
-            if (code != null) {
-                out.append('§').append(code);
-            } else {
-                out.append(rgbToLegacyHex(color.getValue()));
-            }
-        }
-
-        if (style.isBold()) out.append("§l");
-        if (style.isItalic()) out.append("§o");
-        if (style.isUnderlined()) out.append("§n");
-        if (style.isStrikethrough()) out.append("§m");
-        if (style.isObfuscated()) out.append("§k");
-
-        return out.toString();
-    }
-
-    private static String rgbToLegacyHex(int rgb) {
-        String hex = String.format("%06x", (rgb & 0xFFFFFF));
-        StringBuilder out = new StringBuilder("§x");
-        for (int i = 0; i < hex.length(); i++) {
-            out.append('§').append(hex.charAt(i));
-        }
-        return out.toString();
-    }
-
-    private static String rgbToLegacyColorCode(int rgb) {
-        int v = rgb & 0xFFFFFF;
-        // Mojmap ChatFormatting colors (0-15).
-        if (v == 0x000000) return "0";
-        if (v == 0x0000AA) return "1";
-        if (v == 0x00AA00) return "2";
-        if (v == 0x00AAAA) return "3";
-        if (v == 0xAA0000) return "4";
-        if (v == 0xAA00AA) return "5";
-        if (v == 0xFFAA00) return "6";
-        if (v == 0xAAAAAA) return "7";
-        if (v == 0x555555) return "8";
-        if (v == 0x5555FF) return "9";
-        if (v == 0x55FF55) return "a";
-        if (v == 0x55FFFF) return "b";
-        if (v == 0xFF5555) return "c";
-        if (v == 0xFF55FF) return "d";
-        if (v == 0xFFFF55) return "e";
-        if (v == 0xFFFFFF) return "f";
-        return null;
     }
 
     private void completeTask(RenderTask task, boolean uploadSuccess) {

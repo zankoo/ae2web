@@ -48,32 +48,6 @@ export type InventoryConfigController = {
 
 const DEFAULT_CONFIG: InventoryViewConfig = { whitelist: [], blacklist: [], categories: [], collapsed: {} };
 
-function normalizeInventoryViewConfig(raw: InventoryViewConfig | null | undefined): InventoryViewConfig {
-	const whitelist = Array.isArray(raw?.whitelist)
-		? raw.whitelist.filter((x) => typeof x === 'string' && x.trim())
-		: [];
-	const blacklist = Array.isArray(raw?.blacklist)
-		? raw.blacklist.filter((x) => typeof x === 'string' && x.trim())
-		: [];
-	const categories = Array.isArray(raw?.categories)
-		? raw.categories
-				.filter(
-					(x) =>
-						x &&
-						typeof x.name === 'string' &&
-						x.name.trim() &&
-						typeof x.tagRegex === 'string' &&
-						x.tagRegex.trim()
-				)
-				.map((x) => ({ name: x.name.trim(), tagRegex: x.tagRegex.trim() }))
-		: [];
-	const collapsed =
-		raw?.collapsed && typeof raw.collapsed === 'object'
-			? { ...(raw.collapsed as Record<string, boolean>) }
-			: {};
-	return { whitelist, blacklist, categories, collapsed };
-}
-
 function isUnauthorizedError(e: unknown): boolean {
 	const message = e instanceof Error ? e.message : String(e ?? '');
 	return message.toLowerCase().includes('unauthorized') || message.includes('HTTP 401');
@@ -129,7 +103,7 @@ export function createInventoryConfigController({
 			try {
 				const saved = await saveInventoryViewConfig(targetTerminalId, cfg);
 				if (getCurrentTerminalId() === targetTerminalId) {
-					view.config = normalizeInventoryViewConfig(saved);
+					view.config = saved;
 					view.terminalId = targetTerminalId;
 				}
 			} catch (e) {
@@ -151,7 +125,7 @@ export function createInventoryConfigController({
 
 		try {
 			const cfg = await fetchInventoryViewConfig(nextTerminalId);
-			view.config = normalizeInventoryViewConfig(cfg);
+			view.config = cfg;
 			view.terminalId = nextTerminalId;
 		} catch (e) {
 			if (isUnauthorizedError(e)) {
@@ -190,10 +164,9 @@ export function createInventoryConfigController({
 		try {
 			const cfg =
 				terminal.id === view.terminalId ? view.config : await fetchInventoryViewConfig(terminal.id);
-			const normalized = normalizeInventoryViewConfig(cfg);
-			settings.whitelistText = normalized.whitelist.join('\n');
-			settings.blacklistText = normalized.blacklist.join('\n');
-			settings.categories = normalized.categories.map((x) => createCategoryDraft(x));
+			settings.whitelistText = cfg.whitelist.join('\n');
+			settings.blacklistText = cfg.blacklist.join('\n');
+			settings.categories = cfg.categories.map((x) => createCategoryDraft(x));
 		} catch (e) {
 			if (isUnauthorizedError(e)) {
 				showToast('Invalid token', 'error');
@@ -258,7 +231,7 @@ export function createInventoryConfigController({
 		try {
 			const saved = await saveInventoryViewConfig(settings.terminalId, nextCfg);
 			if (getCurrentTerminalId() === settings.terminalId) {
-				view.config = normalizeInventoryViewConfig(saved);
+				view.config = saved;
 				view.terminalId = settings.terminalId;
 			}
 			closeSettingsModal();

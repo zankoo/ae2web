@@ -1,5 +1,6 @@
 package com.kokoda.ae2web.web.auth;
 
+import com.kokoda.ae2web.AE2WebMod;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.QueryStringDecoder;
@@ -34,7 +35,8 @@ public final class AuthTokenExtractor {
                     return token;
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            AE2WebMod.LOGGER.debug("Failed to parse token from URI query string", e);
             return null;
         }
 
