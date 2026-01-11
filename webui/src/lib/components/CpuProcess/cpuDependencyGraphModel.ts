@@ -1,6 +1,6 @@
 import type { CpuProcessEntryDto, CpuProcessPatternDto, GenericStackDto } from '$lib/api/types';
 
-export type CpuCounts = { stored: number; waiting: number; active: number };
+export type CpuCounts = { stored: number; waiting: number; active: number; completed?: boolean };
 
 export type CpuDependencyGraphNode = {
 	id: string;
@@ -48,7 +48,8 @@ function normalizeCounts(entry: CpuProcessEntryDto): CpuCounts {
 	return {
 		stored: Number(entry.stored ?? 0),
 		waiting: Number(entry.waiting ?? 0),
-		active: Number(entry.active ?? 0)
+		active: Number(entry.active ?? 0),
+		completed: entry.completed
 	};
 }
 

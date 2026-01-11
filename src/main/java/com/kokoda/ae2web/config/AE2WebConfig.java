@@ -85,7 +85,7 @@ public class AE2WebConfig {
     }
 
     public static void register() {
-        ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, SPEC, "ae2web-server.toml");
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SPEC, "ae2web-server.toml");
     }
 
     public static int getHttpPort() {

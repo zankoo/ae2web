@@ -124,6 +124,7 @@ export type CpuProcessEntryDto = {
 	stored: number;
 	waiting: number;
 	active: number;
+	completed?: boolean;
 };
 
 export type CpuProcessPatternInputDto = {

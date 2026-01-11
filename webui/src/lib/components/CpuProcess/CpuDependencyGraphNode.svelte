@@ -36,13 +36,16 @@
 	let active = $derived(Number(counts?.active ?? 0));
 	let waiting = $derived(Number(counts?.waiting ?? 0));
 	let stored = $derived(Number(counts?.stored ?? 0));
+	let completed = $derived(Boolean(counts?.completed));
 
 	let stateClass = $derived(
-		active > 0
-			? 'border-info/40 bg-info/5'
-			: waiting > 0
-				? 'border-warning/40 bg-warning/5'
-				: 'border-base-300 bg-base-200'
+		completed
+			? 'border-success/40 bg-success/5'
+			: active > 0
+				? 'border-info/40 bg-info/5'
+				: waiting > 0
+					? 'border-warning/40 bg-warning/5'
+					: 'border-base-300 bg-base-200'
 	);
 
 	let selectClass = $derived(
@@ -86,6 +89,9 @@
 			<div class="text-[0.7rem] text-base-content/60 font-mono truncate">{stack?.id ?? ''}</div>
 			{#if counts}
 				<div class="flex flex-wrap gap-1.5 mt-1">
+					{#if completed}
+						<span class="badge badge-xs badge-success font-mono">✓</span>
+					{/if}
 					{#if active > 0}
 						<span class="badge badge-xs badge-info font-mono">A {fmt(active)}</span>
 					{/if}

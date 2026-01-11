@@ -1,4 +1,5 @@
 import { fetchTooltip } from '$lib/api/prerender';
+import { getTooltipFromStorage, setTooltipInStorage } from '$lib/storage/tooltipCache';
 import { legacyTextToHtml } from '$lib/utils/minecraftText';
 import { createTooltipPositioner, type TooltipPositioner } from '$lib/utils/tooltipPositioner';
 
@@ -85,16 +86,27 @@ export function createTooltipController({
 	}
 
 	async function requestTooltip(iconKey: string): Promise<void> {
-		const cached = cache.get(iconKey);
-		if (cached) {
-			if (hoverKey === iconKey) renderTooltip(cached);
+		// L1: Check memory cache
+		const memoryCached = cache.get(iconKey);
+		if (memoryCached) {
+			if (hoverKey === iconKey) renderTooltip(memoryCached);
 			return;
 		}
 
+		// L2: Check localStorage cache
+		const storageCached = getTooltipFromStorage(iconKey);
+		if (storageCached) {
+			cache.set(iconKey, storageCached);
+			if (hoverKey === iconKey) renderTooltip(storageCached);
+			return;
+		}
+
+		// L3: Fetch from API
 		try {
 			const data = await fetchTooltip(iconKey);
 			const tooltip = Array.isArray(data?.tooltip) ? data.tooltip.filter(Boolean) : [];
 			cache.set(iconKey, tooltip);
+			setTooltipInStorage(iconKey, tooltip);
 			if (hoverKey === iconKey) renderTooltip(tooltip);
 		} catch {
 			if (hoverKey === iconKey) renderTooltip(['(tooltip not prerendered yet)']);
