@@ -1,4 +1,4 @@
-import type { CpuDto, CpuProcessEntryDto, CpuProcessResponse } from '$lib/api/types';
+import type { CpuDto, CpuProcessEntryDto, CpuProcessPatternDto, CpuProcessResponse } from '$lib/api/types';
 
 type CpuProcessStateAccess = {
 	get open(): boolean;
@@ -49,6 +49,7 @@ export function createCpuProcessController({
 }): CpuProcessController {
 	let timer: number | null = null;
 	const seenEntries = new Map<string, CpuProcessEntryDto>();
+	const seenPatterns = new Map<string, CpuProcessPatternDto>();
 
 	function mergeEntries(newEntries: CpuProcessEntryDto[]): CpuProcessEntryDto[] {
 		const newByKey = new Map(newEntries.map((e) => [e.stack.iconKey, e]));
@@ -59,6 +60,20 @@ export function createCpuProcessController({
 		for (const [key, cached] of seenEntries) {
 			if (!newByKey.has(key)) {
 				result.push({ ...cached, stored: 0, waiting: 0, active: 0, completed: true });
+			}
+		}
+		return result;
+	}
+
+	function mergePatterns(newPatterns: CpuProcessPatternDto[]): CpuProcessPatternDto[] {
+		const newById = new Map(newPatterns.map((p) => [p.patternId, p]));
+		for (const pattern of newPatterns) {
+			seenPatterns.set(pattern.patternId, pattern);
+		}
+		const result: CpuProcessPatternDto[] = [...newPatterns];
+		for (const [id, cached] of seenPatterns) {
+			if (!newById.has(id)) {
+				result.push({ ...cached, remainingRuns: 0 });
 			}
 		}
 		return result;
@@ -93,7 +108,8 @@ export function createCpuProcessController({
 		try {
 			const data = await fetchCpuProcess(terminalId, state.cpuId);
 			const mergedEntries = mergeEntries(data.entries);
-			state.data = { ...data, entries: mergedEntries };
+			const mergedPatterns = mergePatterns(data.patterns);
+			state.data = { ...data, entries: mergedEntries, patterns: mergedPatterns };
 			state.cpuName = data?.name ?? state.cpuName;
 			state.error = null;
 
@@ -103,7 +119,8 @@ export function createCpuProcessController({
 				// Mark all entries as completed
 				state.data = {
 					...data,
-					entries: mergedEntries.map((e) => ({ ...e, completed: true }))
+					entries: mergedEntries.map((e) => ({ ...e, completed: true })),
+					patterns: mergedPatterns
 				};
 				if (!state.completionNotified) {
 					const outputName = data?.summary?.finalOutput?.name;
@@ -120,6 +137,7 @@ export function createCpuProcessController({
 
 				const lastSummary: CpuProcessResponse['summary'] = state.data?.summary ?? {};
 				const lastEntries = state.data?.entries ?? [];
+				const lastPatterns = state.data?.patterns ?? [];
 				const outputTotal = Number(lastSummary.outputTotal ?? 0);
 				const nextSummary =
 					outputTotal > 0
@@ -132,7 +150,7 @@ export function createCpuProcessController({
 					name: state.cpuName ?? null,
 					summary: nextSummary,
 					entries: lastEntries.map((e) => ({ ...e, completed: true })),
-					patterns: []
+					patterns: lastPatterns.map((p) => ({ ...p, remainingRuns: 0 }))
 				};
 
 				if (!state.completionNotified) {
@@ -154,6 +172,7 @@ export function createCpuProcessController({
 		if (!getTerminalId()) return;
 
 		seenEntries.clear();
+		seenPatterns.clear();
 		state.open = true;
 		state.cpuId = cpu.cpuId;
 		state.cpuName = cpu.name;

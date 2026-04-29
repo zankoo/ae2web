@@ -38,7 +38,6 @@
 	const NODE_H = 82;
 
 	let mounted = $state(false);
-	let showSubstitutes = $state(false);
 	let selectedNodeId = $state<string | null>(null);
 	let layouting = $state(false);
 	let lastLayoutKey = '';
@@ -63,7 +62,6 @@
 				maxNodes: 600,
 				maxDepth: 12,
 				maxPatternsPerOutput: 3,
-				showSubstitutes,
 				inferChoiceFromEntries: true
 			}
 		})
@@ -188,6 +186,11 @@
 		selectedNodeId = null;
 	}
 
+	function forceLayout(): void {
+		lastLayoutKey = '';
+		void layoutIfNeeded();
+	}
+
 	function entryFor(iconKey: string): CpuProcessEntryDto | null {
 		return entryByIconKey.get(iconKey) ?? null;
 	}
@@ -207,24 +210,13 @@
 </script>
 
 <div class="space-y-3">
-	<div class="flex items-center justify-between gap-3">
-		<label class="flex items-center gap-2 text-sm">
-			<input
-				type="checkbox"
-				class="toggle toggle-sm toggle-primary"
-				bind:checked={showSubstitutes}
-			/>
-			<span>Show substitutes</span>
-		</label>
-
-		<div class="flex items-center gap-2">
-			{#if graph.truncated}
-				<span class="badge badge-warning badge-sm">truncated</span>
-			{/if}
-			{#if layouting}
-				<span class="loading loading-spinner loading-xs text-primary"></span>
-			{/if}
-		</div>
+	<div class="flex items-center justify-end gap-2">
+		{#if graph.truncated}
+			<span class="badge badge-warning badge-sm">truncated</span>
+		{/if}
+		{#if layouting}
+			<span class="loading loading-spinner loading-xs text-primary"></span>
+		{/if}
 	</div>
 
 	<div class="relative h-[520px] rounded-xl border border-base-300 bg-base-200 overflow-hidden">
@@ -239,6 +231,7 @@
 				{nodeTypes}
 				{edgeTypes}
 				fitView
+				minZoom={0.1}
 				nodesDraggable={false}
 				nodesConnectable={false}
 				panOnScroll={true}
@@ -251,6 +244,22 @@
 				<CpuDependencyGraphAutoFit signal={fitSignal} />
 				<Background variant={BackgroundVariant.Dots} gap={18} size={1} />
 				<Controls />
+				<div class="absolute bottom-3 left-14 z-10">
+					<button
+						class="btn btn-xs btn-square bg-base-100 border-base-300 hover:bg-base-200"
+						title="Auto layout"
+						onclick={forceLayout}
+						disabled={layouting}
+					>
+						{#if layouting}
+							<span class="loading loading-spinner loading-xs"></span>
+						{:else}
+							<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM17 14v3h3M14 17h3v3" />
+							</svg>
+						{/if}
+					</button>
+				</div>
 			</SvelteFlow>
 
 			{#if selected}
