@@ -4,6 +4,7 @@ import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.client.network.PrerenderHttpClient;
 import com.kokoda.ae2web.client.render.RenderScheduler;
 import com.kokoda.ae2web.config.AE2WebConfig;
+import com.kokoda.ae2web.network.ServerInfoPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
@@ -54,27 +55,16 @@ public class PrerenderTrigger {
     private static volatile boolean bootstrapAll = false;
     private static volatile boolean bootstrapNotified = false;
 
-    @SubscribeEvent
-    public static void onPlayerJoin(ClientPlayerNetworkEvent.LoggingIn event) {
-        if (!AE2WebConfig.isPrerenderEnabled()) {
+    /**
+     * Called on the client thread when the server sends its web settings after login.
+     */
+    public static void onServerInfo(ServerInfoPacket info) {
+        ServerConnectionInfo.set(info);
+        if (!info.isPrerenderEnabled()) {
             return;
         }
 
-        // Determine server URL
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.getCurrentServer() != null) {
-            // Multiplayer - use server IP
-            String serverIp = mc.getCurrentServer().ip;
-            int port = AE2WebConfig.getHttpPort();
-
-            // Extract host from server address, handling IPv4 and IPv6
-            serverIp = extractHost(serverIp);
-
-            serverUrl = "http://" + serverIp + ":" + port;
-        } else {
-            // Single player or LAN - use localhost
-            serverUrl = "http://localhost:" + AE2WebConfig.getHttpPort();
-        }
+        serverUrl = buildServerUrl(info.getHttpPort());
 
         synchronized (executorLock) {
             if (pollExecutor == null || pollExecutor.isShutdown()) {
@@ -101,6 +91,7 @@ public class PrerenderTrigger {
     public static void onPlayerLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         pollingEnabled = false;
         serverUrl = null;
+        ServerConnectionInfo.clear();
         bootstrapChecked = false;
         bootstrapAll = false;
         bootstrapNotified = false;
@@ -217,7 +208,8 @@ public class PrerenderTrigger {
             return;
         }
 
-        int configMax = AE2WebConfig.getPrerenderAutoMaxItems();
+        ServerInfoPacket info = ServerConnectionInfo.get();
+        int configMax = info != null ? info.getPrerenderAutoMaxItems() : 0;
         int fetchLimit = configMax <= 0 ? DEFAULT_FETCH_LIMIT : Math.min(DEFAULT_FETCH_LIMIT, configMax);
 
         PrerenderHttpClient client = PrerenderHttpClient.getInstance();
@@ -391,6 +383,31 @@ public class PrerenderTrigger {
      */
     public static String getServerUrl() {
         return serverUrl;
+    }
+
+    /**
+     * The current server URL, or one built from the server-provided (or local fallback) port.
+     */
+    public static String getOrResolveServerUrl() {
+        String current = serverUrl;
+        if (current != null) {
+            return current;
+        }
+        ServerInfoPacket info = ServerConnectionInfo.get();
+        int port = info != null ? info.getHttpPort() : AE2WebConfig.getHttpPort();
+        current = buildServerUrl(port);
+        serverUrl = current;
+        return current;
+    }
+
+    private static String buildServerUrl(int port) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getCurrentServer() != null) {
+            // Multiplayer - use server IP
+            return "http://" + extractHost(mc.getCurrentServer().ip) + ":" + port;
+        }
+        // Single player or LAN host - use localhost
+        return "http://localhost:" + port;
     }
 
     /**

@@ -112,7 +112,9 @@ public final class ProductionHistoryService {
 
     /**
      * Record a data point for an item.
-     * Only records if enough time has passed since last record.
+     *
+     * At most one "anchor" point is kept per {@link #MIN_INTERVAL_MS}. Changes inside that window update a
+     * single trailing point instead of being dropped, so the history always ends at the latest amount.
      */
     public void recordDataPoint(String terminalId, String uniqueId, long amount, long timestamp) {
         if (terminalId == null || terminalId.isBlank() || uniqueId == null || uniqueId.isBlank()) {
@@ -130,6 +132,15 @@ public final class ProductionHistoryService {
         synchronized (points) {
             Long lastTime = terminalLastRecords.get(uniqueId);
             if (lastTime != null && timestamp - lastTime < MIN_INTERVAL_MS) {
+                // Replace the trailing point recorded after the anchor, if any.
+                if (!points.isEmpty() && points.get(points.size() - 1).timestamp() > lastTime) {
+                    points.remove(points.size() - 1);
+                    markDirty();
+                }
+                if (points.isEmpty() || points.get(points.size() - 1).amount() != amount) {
+                    points.add(new DataPoint(timestamp, amount));
+                    markDirty();
+                }
                 return;
             }
 

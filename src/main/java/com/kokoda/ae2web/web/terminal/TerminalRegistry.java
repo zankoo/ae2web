@@ -33,7 +33,14 @@ public final class TerminalRegistry {
         if (terminal == null) {
             return;
         }
-        unregisterById(terminal.getTerminalId());
+        String terminalId = terminal.getTerminalId();
+        if (terminalId == null || terminalId.isBlank()) {
+            return;
+        }
+        // Only remove the entry if it is this block entity; another terminal may share the id.
+        if (terminals.remove(terminalId, terminal)) {
+            AE2WebMod.LOGGER.debug("Unregistered terminal: {}", terminalId);
+        }
     }
 
     public void unregisterById(String terminalId) {

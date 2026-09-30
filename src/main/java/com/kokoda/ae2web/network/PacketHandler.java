@@ -8,7 +8,7 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public class PacketHandler {
-    private static final String PROTOCOL_VERSION = "1";
+    private static final String PROTOCOL_VERSION = "2";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(AE2WebMod.MOD_ID, "main"),
@@ -34,6 +34,14 @@ public class PacketHandler {
                 CopyToClipboardPacket::encode,
                 CopyToClipboardPacket::decode,
                 CopyToClipboardPacket::handle
+        );
+
+        CHANNEL.registerMessage(
+                packetId++,
+                ServerInfoPacket.class,
+                ServerInfoPacket::encode,
+                ServerInfoPacket::decode,
+                ServerInfoPacket::handle
         );
 
         AE2WebMod.LOGGER.info("Registered network packets");

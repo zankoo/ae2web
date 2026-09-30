@@ -9,14 +9,17 @@ import com.kokoda.ae2web.setup.ClientSetup;
 import com.kokoda.ae2web.setup.CommonSetup;
 import com.kokoda.ae2web.config.AE2WebConfig;
 import com.kokoda.ae2web.network.PacketHandler;
+import com.kokoda.ae2web.network.ServerInfoPacket;
 import com.kokoda.ae2web.web.WebServer;
 import com.kokoda.ae2web.web.handlers.CraftingHandler;
 import com.kokoda.ae2web.web.prerender.PrerenderStorageService;
 import com.kokoda.ae2web.server.command.TokenCommand;
 import com.mojang.logging.LogUtils;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -74,6 +77,13 @@ public class AE2WebMod {
         CraftingHandler.shutdownExecutor();
         PrerenderStorageService.getInstance().shutdownMaintenance();
         WebServer.getInstance().stop();
+    }
+
+    @SubscribeEvent
+    public void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            PacketHandler.sendToPlayer(player, ServerInfoPacket.forPlayer(player.getUUID()));
+        }
     }
 
     @SubscribeEvent

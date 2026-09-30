@@ -54,6 +54,11 @@ public final class WebServer {
             ProductionHistoryService.getInstance().start(executor);
             InventorySseService.getInstance().setExecutor(executor);
 
+            if (AE2WebConfig.isAuthEnabled() && AE2WebConfig.isDefaultAuthToken(AE2WebConfig.getAuthToken())) {
+                AE2WebMod.LOGGER.warn("AE2 Web auth is enabled but authToken is unset/default; the shared token is disabled. "
+                        + "Players must use their personal token from /ae2web token.");
+            }
+
             int port = AE2WebConfig.getHttpPort();
             String bindAddress = AE2WebConfig.getBindAddress();
             serverThread = new Thread(() -> runServer(bindAddress, port), "AE2Web-HTTP");

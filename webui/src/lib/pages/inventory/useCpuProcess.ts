@@ -48,6 +48,8 @@ export function createCpuProcessController({
 	intervalMs?: number;
 }): CpuProcessController {
 	let timer: number | null = null;
+	// Bumped whenever the modal opens or closes so responses for a previous CPU are discarded.
+	let generation = 0;
 	const seenEntries = new Map<string, CpuProcessEntryDto>();
 	const seenPatterns = new Map<string, CpuProcessPatternDto>();
 
@@ -104,9 +106,13 @@ export function createCpuProcessController({
 		if (!state.cpuId) return;
 		if (state.loading) return;
 
+		const requestGeneration = generation;
+		const isStale = () => requestGeneration !== generation;
+
 		state.loading = true;
 		try {
 			const data = await fetchCpuProcess(terminalId, state.cpuId);
+			if (isStale()) return;
 			const mergedEntries = mergeEntries(data.entries);
 			const mergedPatterns = mergePatterns(data.patterns);
 			state.data = { ...data, entries: mergedEntries, patterns: mergedPatterns };
@@ -129,6 +135,7 @@ export function createCpuProcessController({
 				}
 			}
 		} catch (e) {
+			if (isStale()) return;
 			const message = e instanceof Error ? e.message : 'Failed to load CPU process';
 			if (message.toLowerCase().includes('not busy')) {
 				state.autoRefresh = false;
@@ -162,7 +169,7 @@ export function createCpuProcessController({
 			}
 			state.error = message;
 		} finally {
-			state.loading = false;
+			if (!isStale()) state.loading = false;
 		}
 	}
 
@@ -171,6 +178,7 @@ export function createCpuProcessController({
 		if (!cpu.cpuId) return;
 		if (!getTerminalId()) return;
 
+		generation++;
 		seenEntries.clear();
 		seenPatterns.clear();
 		state.open = true;
@@ -186,7 +194,9 @@ export function createCpuProcessController({
 	}
 
 	function closeModal(): void {
+		generation++;
 		state.open = false;
+		state.loading = false;
 		stopTimer();
 	}
 

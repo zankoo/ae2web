@@ -4,7 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.kokoda.ae2web.AE2WebMod;
-import com.kokoda.ae2web.config.AE2WebConfig;
+import com.kokoda.ae2web.client.ServerConnectionInfo;
 import com.kokoda.ae2web.util.PrerenderUtils;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -459,9 +459,7 @@ public class PrerenderHttpClient {
         conn.setConnectTimeout(TIMEOUT_MS);
         conn.setReadTimeout(TIMEOUT_MS);
         conn.setRequestProperty("User-Agent", "AE2WebTerminal-Client");
-        if (AE2WebConfig.isAuthEnabled()) {
-            PrerenderUtils.applyBearerAuth(conn, AE2WebConfig.getAuthToken());
-        }
+        PrerenderUtils.applyBearerAuth(conn, ServerConnectionInfo.token());
         return conn;
     }
 

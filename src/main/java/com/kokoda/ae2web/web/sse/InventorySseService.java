@@ -133,6 +133,9 @@ public final class InventorySseService {
             if (state.initialized) {
                 return;
             }
+            // Deltas queued before now are older than the snapshot built below; applying them on top of it
+            // would roll amounts back. Only deltas queued while the snapshot is being built are kept.
+            state.pending.clear();
         }
 
         PrerenderStorageService storage = PrerenderStorageService.getInstance();

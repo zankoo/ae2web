@@ -126,7 +126,12 @@ public final class CraftRequestHandler {
 
         CompletableFuture
                 .supplyAsync(() -> getCraftingPlan(planFuture), CraftingExecutors.get())
-                .thenAcceptAsync(plan -> processCraftingPlan(craftContext, plan), r -> scheduleOnServerThread(r));
+                .whenComplete((result, ex) -> {
+                    CraftingPlanResult planResult = ex != null ? new CraftingPlanResult(null, "error") : result;
+                    // runOnServerThread answers 503 if the server is gone and 500 if processing throws,
+                    // so the request always gets a response.
+                    runOnServerThread(ctx, headers, () -> processCraftingPlan(craftContext, planResult));
+                });
     }
 
     private record CraftingPlanResult(ICraftingPlan plan, String error) {}
@@ -136,7 +141,12 @@ public final class CraftRequestHandler {
             ICraftingPlan plan = planFuture.get(CRAFT_CALCULATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return new CraftingPlanResult(plan, null);
         } catch (TimeoutException e) {
+            planFuture.cancel(true);
             return new CraftingPlanResult(null, "timeout");
+        } catch (InterruptedException e) {
+            planFuture.cancel(true);
+            Thread.currentThread().interrupt();
+            return new CraftingPlanResult(null, "error");
         } catch (Exception e) {
             return new CraftingPlanResult(null, "error");
         }

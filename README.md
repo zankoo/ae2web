@@ -107,9 +107,19 @@ bindAddress = "0.0.0.0"
 # 是否启用 Token 认证
 enableAuth = false
 
-# 认证令牌（请设置为安全的随机字符串）
+# 共享认证令牌（请设置为安全的随机字符串）
+# 保持默认值或留空时共享令牌不生效，玩家需使用 /ae2web token 获取的个人令牌
 authToken = "change-me-to-a-secure-token"
+
+# 额外允许跨域访问 API 的浏览器来源，例如 ["https://example.com"]
+# 同源请求始终允许；"*" 表示允许任意来源（不推荐）
+allowedOrigins = []
 ```
+
+> 服务器会拒绝来自其他网站的浏览器请求（按 `Origin` 与 `Host` / `X-Forwarded-Host` 比对），
+> 防止恶意网页借玩家的浏览器调用 API。使用反向代理时请转发 `Host` 或 `X-Forwarded-Host`，或把域名加入 `allowedOrigins`。
+>
+> 客户端的预渲染会在进服时自动从服务器获取 HTTP 端口、预渲染开关和玩家个人令牌，无需在客户端配置。
 
 ### 预渲染配置
 

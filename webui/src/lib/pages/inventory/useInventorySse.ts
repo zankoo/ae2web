@@ -54,8 +54,18 @@ export function createInventorySseController({
 	let lastVersion: number | null = null;
 	let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
+	// Flushes are skipped while the tab is hidden; catch up as soon as it becomes visible again.
+	function onVisibilityChange(): void {
+		if (!document.hidden && state.inventoryStateDirty) {
+			void flushInventoryState();
+		}
+	}
+
 	function stop(): void {
 		lastVersion = null;
+		if (typeof document !== 'undefined') {
+			document.removeEventListener('visibilitychange', onVisibilityChange);
+		}
 		state.inventoryStateDirty = false;
 		state.inventoryStateFlushInFlight = false;
 		state.inventoryStateFlushPending = false;
@@ -80,6 +90,10 @@ export function createInventorySseController({
 
 		const terminalId = getTerminalId();
 		if (!terminalId) return;
+
+		if (typeof document !== 'undefined') {
+			document.addEventListener('visibilitychange', onVisibilityChange);
+		}
 
 		eventSource = openInventorySse(terminalId, {
 			onHello: (msg) => {

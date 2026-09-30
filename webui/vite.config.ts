@@ -12,7 +12,9 @@ export default defineConfig(({ mode }) => ({
 		proxy: {
 			'/api': {
 				target: 'http://127.0.0.1:8080',
-				changeOrigin: true
+				changeOrigin: true,
+				// Sends X-Forwarded-Host so the backend's same-origin check matches the dev server's Origin.
+				xfwd: true
 			}
 		}
 	},

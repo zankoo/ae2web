@@ -4,6 +4,10 @@ import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.config.ModConfig;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.List;
+
 public class AE2WebConfig {
     public static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
     public static final ForgeConfigSpec SPEC;
@@ -12,6 +16,7 @@ public class AE2WebConfig {
     private static final String DEFAULT_BIND_ADDRESS = "0.0.0.0";
     private static final boolean DEFAULT_ENABLE_AUTH = false;
     private static final String DEFAULT_AUTH_TOKEN = "change-me-to-a-secure-token";
+    private static final List<String> DEFAULT_ALLOWED_ORIGINS = List.of();
 
     private static final boolean DEFAULT_PRERENDER_ENABLED = true;
     private static final int DEFAULT_PRERENDER_MAX_UPLOAD_SIZE = 65536;
@@ -24,6 +29,7 @@ public class AE2WebConfig {
     public static final ForgeConfigSpec.ConfigValue<String> BIND_ADDRESS;
     public static final ForgeConfigSpec.ConfigValue<String> AUTH_TOKEN;
     public static final ForgeConfigSpec.BooleanValue ENABLE_AUTH;
+    public static final ForgeConfigSpec.ConfigValue<List<? extends String>> ALLOWED_ORIGINS;
 
     // Prerender settings
     public static final ForgeConfigSpec.BooleanValue PRERENDER_ENABLED;
@@ -49,8 +55,14 @@ public class AE2WebConfig {
                 .define("enableAuth", DEFAULT_ENABLE_AUTH);
         
         AUTH_TOKEN = BUILDER
-                .comment("Authentication token for API access (set your own secure token)")
+                .comment("Shared authentication token for API access. Ignored while left at the default value;",
+                        "players can always use their personal token from /ae2web token.")
                 .define("authToken", DEFAULT_AUTH_TOKEN);
+
+        ALLOWED_ORIGINS = BUILDER
+                .comment("Extra browser origins allowed to call the API cross-origin (e.g. \"https://example.com\").",
+                        "Same-origin requests are always allowed. Use \"*\" to allow any origin (not recommended).")
+                .defineListAllowEmpty("allowedOrigins", DEFAULT_ALLOWED_ORIGINS, o -> o instanceof String);
 
         BUILDER.pop();
 
@@ -84,6 +96,10 @@ public class AE2WebConfig {
         SPEC = BUILDER.build();
     }
 
+    /**
+     * Registered as COMMON so the file stays at config/ae2web-server.toml. Clients never read it for
+     * connection settings: the server sends those in {@link com.kokoda.ae2web.network.ServerInfoPacket}.
+     */
     public static void register() {
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SPEC, "ae2web-server.toml");
     }
@@ -102,6 +118,27 @@ public class AE2WebConfig {
 
     public static String getAuthToken() {
         return getOrDefault(AUTH_TOKEN, DEFAULT_AUTH_TOKEN);
+    }
+
+    public static List<? extends String> getAllowedOrigins() {
+        return getOrDefault(ALLOWED_ORIGINS, DEFAULT_ALLOWED_ORIGINS);
+    }
+
+    public static boolean isDefaultAuthToken(String token) {
+        return token == null || token.isBlank() || token.equals(DEFAULT_AUTH_TOKEN);
+    }
+
+    /**
+     * Checks a presented token against the configured shared token. The shipped default and blank
+     * values never match, so enabling auth without changing authToken does not leave a public token.
+     */
+    public static boolean matchesSharedToken(String configured, String presented) {
+        if (isDefaultAuthToken(configured) || presented == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                configured.getBytes(StandardCharsets.UTF_8),
+                presented.getBytes(StandardCharsets.UTF_8));
     }
 
     public static boolean isPrerenderEnabled() {

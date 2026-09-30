@@ -15,6 +15,75 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ApiHandlerTest {
+    private static FullHttpResponse send(HttpMethod method, String uri, String... headerPairs) {
+        EmbeddedChannel channel = new EmbeddedChannel(new ApiHandler());
+        var req = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, method, uri, Unpooled.EMPTY_BUFFER);
+        for (int i = 0; i < headerPairs.length; i += 2) {
+            req.headers().set(headerPairs[i], headerPairs[i + 1]);
+        }
+        channel.writeInbound(req);
+        return channel.readOutbound();
+    }
+
+    @Test
+    void crossOriginRequestIsRejected() {
+        FullHttpResponse resp = send(HttpMethod.POST, "/api/craft",
+                "Origin", "http://evil.example", "Host", "localhost:8080");
+        try {
+            assertThat(resp.status()).isEqualTo(HttpResponseStatus.FORBIDDEN);
+            assertThat(resp.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN)).isNull();
+        } finally {
+            ReferenceCountUtil.release(resp);
+        }
+    }
+
+    @Test
+    void crossOriginPreflightIsRejected() {
+        FullHttpResponse resp = send(HttpMethod.OPTIONS, "/api/craft",
+                "Origin", "http://evil.example", "Host", "localhost:8080");
+        try {
+            assertThat(resp.status()).isEqualTo(HttpResponseStatus.FORBIDDEN);
+        } finally {
+            ReferenceCountUtil.release(resp);
+        }
+    }
+
+    @Test
+    void sameOriginRequestEchoesOrigin() {
+        FullHttpResponse resp = send(HttpMethod.GET, "/api/nope",
+                "Origin", "http://localhost:8080", "Host", "localhost:8080");
+        try {
+            assertThat(resp.status()).isEqualTo(HttpResponseStatus.NOT_FOUND);
+            assertThat(resp.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("http://localhost:8080");
+            assertThat(resp.headers().get(HttpHeaderNames.VARY)).isEqualToIgnoringCase("Origin");
+        } finally {
+            ReferenceCountUtil.release(resp);
+        }
+    }
+
+    @Test
+    void forwardedHostIsAcceptedAsSameOrigin() {
+        FullHttpResponse resp = send(HttpMethod.GET, "/api/nope",
+                "Origin", "https://ae2.example.com", "Host", "127.0.0.1:8080",
+                "X-Forwarded-Host", "ae2.example.com");
+        try {
+            assertThat(resp.status()).isEqualTo(HttpResponseStatus.NOT_FOUND);
+        } finally {
+            ReferenceCountUtil.release(resp);
+        }
+    }
+
+    @Test
+    void requestWithoutOriginHasNoWildcardCorsHeader() {
+        FullHttpResponse resp = send(HttpMethod.GET, "/api/nope");
+        try {
+            assertThat(resp.status()).isEqualTo(HttpResponseStatus.NOT_FOUND);
+            assertThat(resp.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN)).isNull();
+        } finally {
+            ReferenceCountUtil.release(resp);
+        }
+    }
+
     @Test
     void optionsAlwaysReturnsOk() {
         EmbeddedChannel channel = new EmbeddedChannel(new ApiHandler());

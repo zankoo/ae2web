@@ -4,7 +4,6 @@ import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.client.PrerenderTrigger;
 import com.kokoda.ae2web.client.network.PrerenderHttpClient;
 import com.kokoda.ae2web.client.render.RenderScheduler;
-import com.kokoda.ae2web.config.AE2WebConfig;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -46,11 +45,7 @@ public class RenderCommand {
      * @param limit 0 = unlimited, otherwise limit the number of items to render
      */
     private static int executeRender(CommandContext<CommandSourceStack> ctx, int limit) {
-        String serverUrl = PrerenderTrigger.getServerUrl();
-        if (serverUrl == null) {
-            serverUrl = "http://localhost:" + AE2WebConfig.getHttpPort();
-            PrerenderTrigger.setServerUrl(serverUrl);
-        }
+        String serverUrl = PrerenderTrigger.getOrResolveServerUrl();
 
         RenderScheduler scheduler = RenderScheduler.getInstance();
         if (scheduler.isActive()) {
@@ -125,11 +120,7 @@ public class RenderCommand {
      * Force re-render ALL items (including already rendered ones).
      */
     private static int executeRenderFull(CommandContext<CommandSourceStack> ctx) {
-        String serverUrl = PrerenderTrigger.getServerUrl();
-        if (serverUrl == null) {
-            serverUrl = "http://localhost:" + AE2WebConfig.getHttpPort();
-            PrerenderTrigger.setServerUrl(serverUrl);
-        }
+        String serverUrl = PrerenderTrigger.getOrResolveServerUrl();
 
         RenderScheduler scheduler = RenderScheduler.getInstance();
         if (scheduler.isActive()) {

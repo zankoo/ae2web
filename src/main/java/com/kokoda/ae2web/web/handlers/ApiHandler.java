@@ -3,6 +3,7 @@ package com.kokoda.ae2web.web.handlers;
 import com.kokoda.ae2web.AE2WebMod;
 import com.kokoda.ae2web.config.AE2WebConfig;
 import com.kokoda.ae2web.web.auth.AuthTokenExtractor;
+import com.kokoda.ae2web.web.auth.OriginPolicy;
 import com.kokoda.ae2web.web.auth.PlayerAuthService;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -20,6 +21,7 @@ import static com.kokoda.ae2web.web.handlers.HandlerUtils.*;
  * Delegates to specialized handlers for each endpoint group.
  */
 public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+    private static final String X_FORWARDED_HOST = "X-Forwarded-Host";
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
@@ -28,9 +30,21 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         String path = new QueryStringDecoder(uri).path();
 
         HttpHeaders headers = new DefaultHttpHeaders();
-        headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, OPTIONS");
-        headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Authorization, X-AE2Web-Lang");
+        String origin = request.headers().get(HttpHeaderNames.ORIGIN);
+        List<String> hosts = Arrays.asList(
+                request.headers().get(HttpHeaderNames.HOST),
+                request.headers().get(X_FORWARDED_HOST));
+        if (!OriginPolicy.isAllowed(origin, hosts, AE2WebConfig.getAllowedOrigins())) {
+            sendJsonResponse(ctx, HttpResponseStatus.FORBIDDEN,
+                    errorJson("Cross-origin request not allowed"), headers);
+            return;
+        }
+        if (origin != null && !origin.isBlank()) {
+            headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+            headers.set(HttpHeaderNames.VARY, HttpHeaderNames.ORIGIN);
+            headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, OPTIONS");
+            headers.set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Authorization, X-AE2Web-Lang");
+        }
 
         if (method == HttpMethod.OPTIONS) {
             sendResponse(ctx, HttpResponseStatus.OK, "", headers);
@@ -72,7 +86,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
 
         // Legacy shared token support (does not map to a player UUID).
-        if (token != null && token.equals(AE2WebConfig.getAuthToken())) {
+        if (AE2WebConfig.matchesSharedToken(AE2WebConfig.getAuthToken(), token)) {
             return true;
         }
 
